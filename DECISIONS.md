@@ -122,3 +122,20 @@ and cannot overwrite current output.
 A per-case advisory lock covers backup, publication, ledger admission, and
 rollback at the stable brief and test paths. This prevents a losing concurrent
 submission from deleting a different submission's committed artifacts.
+
+## D013: Corpus publication commits private state first
+
+Corpus preparation requires exactly ten human-approved tasks per stratum before
+the seeded 3/3/4 selection can run. The twenty development tasks and fixtures
+may be materialized in a public output, while full holdout tasks and fixtures go
+only to a private output outside the repository. The public manifest contains
+only IDs, strata, seed metadata, and salted canonical-task hashes.
+Manifest construction takes the complete approved corpus and derives the seeded
+selection internally; no public API accepts a caller-chosen 3/3/4 subset.
+
+Both output trees are completely staged beside their targets. Publication
+renames the private tree first and treats the public tree as the final commit
+point. Handled errors roll back both trees. A crash may therefore leave private
+state alone, but never a public release that was committed before its private
+counterpart. Existing outputs, symlinks, path aliases, and overlapping roots are
+rejected instead of merged or overwritten.

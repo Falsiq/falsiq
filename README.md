@@ -189,3 +189,8 @@ fixture root, an owner-private workspace root, and a hidden-test callback. Every
 builder finishes before that callback runs, so hidden corpus content is never
 mounted into a builder workspace during construction. Reports use a fixed seed
 and paired bootstrap intervals and retain only per-task numeric conformance.
+
+Human-approved corpus release is a separate operator step. See
+[`eval/README.md`](eval/README.md) for the review gate, deterministic split,
+public/private materialization, and holdout access rules. The checked-in project
+contains no approved heldout task bodies and claims no heldout thresholds.

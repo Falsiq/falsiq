@@ -88,9 +88,9 @@ def test_split_requires_unique_human_curated_tasks_and_sufficient_strata() -> No
 
 
 def test_manifest_contains_only_ids_strata_and_salted_hashes() -> None:
-    selected = select_holdout(approved_corpus(), seed="seed")
+    tasks = approved_corpus()
     manifest = build_holdout_manifest(
-        selected,
+        tasks,
         corpus_version="v0-approved-1",
         seed="seed",
         salt=b"private salt",
@@ -106,10 +106,19 @@ def test_manifest_contains_only_ids_strata_and_salted_hashes() -> None:
 
 
 def test_manifest_cannot_bypass_human_review_gate() -> None:
-    selected = select_holdout(approved_corpus(), seed="seed")
-    selected[0] = selected[0].model_copy(update={"human_curated": False})
+    tasks = approved_corpus()
+    tasks[0] = tasks[0].model_copy(update={"human_curated": False})
 
     with pytest.raises(CorpusError, match="human-curated"):
+        build_holdout_manifest(
+            tasks,
+            corpus_version="v0-approved-1",
+            seed="seed",
+            salt=b"private salt",
+        )
+
+    selected = select_holdout(approved_corpus(), seed="seed")
+    with pytest.raises(CorpusError, match="exactly 10 tasks in each stratum"):
         build_holdout_manifest(
             selected,
             corpus_version="v0-approved-1",
@@ -121,16 +130,15 @@ def test_manifest_cannot_bypass_human_review_gate() -> None:
 def write_private_tasks(root: Path, tasks: list[EvalTask]) -> None:
     root.mkdir()
     for task in tasks:
-        (root / f"{task.task_id}.json").write_text(
-            task.model_dump_json(indent=2), encoding="utf-8"
-        )
+        (root / f"{task.task_id}.json").write_text(task.model_dump_json(indent=2), encoding="utf-8")
 
 
 def test_private_read_verifies_hash_and_logs_access_before_return(tmp_path: Path) -> None:
-    selected = select_holdout(approved_corpus(), seed="seed")
+    tasks = approved_corpus()
+    selected = select_holdout(tasks, seed="seed")
     salt = b"private salt"
     manifest = build_holdout_manifest(
-        selected,
+        tasks,
         corpus_version="v0-approved-1",
         seed="seed",
         salt=salt,
@@ -165,9 +173,10 @@ def test_private_read_verifies_hash_and_logs_access_before_return(tmp_path: Path
 
 
 def test_failed_or_tampered_reads_still_burn_freshness(tmp_path: Path) -> None:
-    selected = select_holdout(approved_corpus(), seed="seed")
+    tasks = approved_corpus()
+    selected = select_holdout(tasks, seed="seed")
     manifest = build_holdout_manifest(
-        selected,
+        tasks,
         corpus_version="v0-approved-1",
         seed="seed",
         salt=b"correct salt",
@@ -202,9 +211,9 @@ def test_failed_or_tampered_reads_still_burn_freshness(tmp_path: Path) -> None:
 
 
 def test_private_read_rejects_unknown_task_without_logging(tmp_path: Path) -> None:
-    selected = select_holdout(approved_corpus(), seed="seed")
+    tasks = approved_corpus()
     manifest = build_holdout_manifest(
-        selected,
+        tasks,
         corpus_version="v0",
         seed="seed",
         salt=b"salt",
