@@ -9,18 +9,20 @@ Falsiq is a mandatory pre-implementation barrier. Keep its CLI deterministic and
 model-free: agents produce strict JSON outside the CLI, while the CLI validates
 and records only selected attacks, exact human rulings, and a derived brief.
 
-The canonical skill source is `skill/SKILL.md`. The project discovery entry
-`.claude/skills/falsiq` is a directory symlink to that canonical directory, so
-there is no second copy to drift. It requires Claude Code 2.1.203 or newer, which
-supports symlinked skill directories. The skill is self-contained: load its
-agent prompts only from `${CLAUDE_SKILL_DIR}/references/`. Treat the current
-working directory as the target repository; never assume the Falsiq source tree
-is the target.
+The canonical skill source is `skill/SKILL.md`. In the Falsiq source checkout,
+the project discovery entry `.claude/skills/falsiq` is a directory symlink to
+that canonical directory, so there is no second copy to drift. It requires
+Claude Code 2.1.203 or newer, which supports symlinked skill directories. A
+target repository may instead contain a copied regular skill directory. The
+skill is self-contained: load its agent prompts only from
+`${CLAUDE_SKILL_DIR}/references/`. Treat the current working directory as the
+target repository; never assume the Falsiq source tree is the target.
 
 ## CLI prerequisite
 
 Before initializing a case, reading state, or editing any target file, verify
-that the separately installed console tool exactly matches this skill:
+that the separately installed console tool reports the
+declared compatible CLI version:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/require_cli.sh"
@@ -45,9 +47,12 @@ true:
 Do not trigger it for a read-only explanation or a purely cosmetic typo unless
 the user explicitly invokes it.
 
-The only bypass is the user's exact instruction `skip falsiq`. Do not treat a
-synonym or your own judgment as a bypass. If there is no current case, initialize
-Falsiq if needed and open a case from the untouched request first. Then record:
+The current user message bypasses this workflow only when it contains a
+case-sensitive standalone line whose contents, after trimming surrounding
+whitespace, are exactly `skip falsiq`. Surrounding prose, synonyms, and case
+variants do not bypass. Do not use your own judgment as a bypass. If there is no
+current case, initialize Falsiq if needed and open a case from the full untouched
+change request first. Then record:
 
 ```console
 falsiq outcome abandoned --case "$CASE" --trace n/a \

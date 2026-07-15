@@ -377,6 +377,33 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
     assert "uv run" not in skill
     assert "${CLAUDE_PROJECT_DIR}/agents/" not in skill
 
+    complete_barrier = (
+        "STOP -- HUMAN RULING REQUIRED\n"
+        "No implementation has started. Reply with an explicit ruling for every "
+        "displayed attack."
+    )
+    assert complete_barrier in skill
+    assert complete_barrier in transcript
+    normalized_skill = " ".join(skill.split())
+    assert "case-sensitive standalone line" in normalized_skill
+    assert "after trimming surrounding whitespace" in normalized_skill
+    assert (
+        "Surrounding prose, synonyms, and case variants do not bypass" in normalized_skill
+    )
+    assert "declared compatible CLI version" in normalized_skill
+    assert "exactly matches this skill" not in skill
+
+    forbidden = transcript.index("$ falsiq rule <ATTACK> forbidden")
+    round_two_agents = transcript.index(
+        "[five fresh class-specific attackers run in parallel for round 2]"
+    )
+    round_two_assembly = transcript.index(
+        "$ falsiq attack assemble --case <CASE> --round 2"
+    )
+    derivation = transcript.index("$ falsiq derive --case <CASE>")
+    assert forbidden < round_two_agents < round_two_assembly < derivation
+    assert "round-two gate does not pass" not in transcript
+
     ordered_transcript_phrases = (
         "$ falsiq intent",
         "$ falsiq attack assemble",

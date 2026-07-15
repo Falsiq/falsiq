@@ -266,3 +266,13 @@ are not ready-to-run acceptance tests. The builder must read each file fully and
 translate its requirement into a new repository-native failing test after
 inspecting local conventions. It must never execute, import, copy, or merge the
 derived file as-is.
+
+## D023: Skill examples are executable gate contracts
+
+The scripted transcript must carry the complete two-line human barrier and obey
+the same round-two transition as the normative skill. A bypass is recognized
+only by a case-sensitive standalone user-message line whose trimmed content is
+exactly `skip falsiq`; prose, synonyms, and case variants do not qualify. The
+prerequisite script checks the CLI's declared compatible version and is not a
+binary identity attestation. Fresh-agent forward tests cover these claims in
+addition to source-level unit tests.

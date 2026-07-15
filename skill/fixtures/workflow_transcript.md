@@ -19,11 +19,16 @@ $ falsiq attack add --file <round.json>
 $ falsiq collide --case <CASE>
 <complete forced-choice collision is presented>
 STOP -- HUMAN RULING REQUIRED
+No implementation has started. Reply with an explicit ruling for every displayed attack.
 [agent ends the turn; no implementation or derivation occurs]
 [user supplies explicit rulings]
 $ falsiq rule <ATTACK> forbidden
 [all other explicit ruling commands run; omitted attacks remain open]
-[state confirms zero open attacks and the round-two gate does not pass]
+[state confirms zero open attacks and the forbidden ruling opens the round-two gate]
+[five fresh class-specific attackers run in parallel for round 2]
+$ falsiq attack assemble --case <CASE> --round 2 <five batch files>
+{"candidates":[],"selected":[],...}
+[round-2 attack add and collide are not called because selection is empty]
 $ falsiq derive --case <CASE>
 <request.json>
 $ cat <request.json>
@@ -40,7 +45,7 @@ $ falsiq guard --case <CASE>
 ## Explicit bypass path
 
 ```text
-[user says the exact phrase: skip falsiq]
+[user message contains a standalone case-sensitive line: skip falsiq]
 $ falsiq outcome abandoned --case <CASE> --trace n/a --notes "User explicitly requested skip falsiq."
 [implementation may proceed from the original request under the recorded bypass]
 ```
