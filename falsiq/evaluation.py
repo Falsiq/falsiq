@@ -79,6 +79,10 @@ AGENT_ROLES = (
     "judge",
 )
 MAX_INTERACTIONS_PER_ROUND = 3
+_WINDOWS_DEVICE_NAME = re.compile(
+    r"^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$",
+    re.IGNORECASE,
+)
 
 StableToken = Annotated[
     str,
@@ -262,8 +266,15 @@ def _safe_relative_file(value: str) -> str:
     parts = value.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         raise ValueError("changed path must be normalized without traversal")
-    if parts[0] in {".git", ".falsiq"}:
+    if parts[0].casefold() in {".git", ".falsiq"}:
         raise ValueError("builder cannot modify repository or Falsiq control data")
+    if any(
+        ":" in part
+        or part.endswith((" ", "."))
+        or _WINDOWS_DEVICE_NAME.fullmatch(part) is not None
+        for part in parts
+    ):
+        raise ValueError("changed path is ambiguous or reserved on Windows")
     return value
 
 
@@ -315,6 +326,9 @@ class BuilderResponse(ContractModel):
             raise ValueError("builder deleted paths must be unique")
         if set(file_paths).intersection(self.deleted_paths):
             raise ValueError("builder cannot update and delete the same path")
+        casefolded_paths = [path.casefold() for path in [*file_paths, *self.deleted_paths]]
+        if len(casefolded_paths) != len(set(casefolded_paths)):
+            raise ValueError("builder paths must remain unique on case-insensitive filesystems")
         expected = sorted([*file_paths, *self.deleted_paths])
         if self.changed_paths != expected:
             raise ValueError("changed_paths must be the sorted materialized path list")

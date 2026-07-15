@@ -485,6 +485,49 @@ def test_role_response_contract_rejects_unknown_fields() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".Git/config",
+        ".FALSIQ/ledger.jsonl",
+        "NUL",
+        "reports/con.txt",
+        "output.txt:secret",
+        "trailing.",
+        "trailing ",
+    ],
+)
+def test_builder_response_rejects_cross_platform_reserved_paths(path: str) -> None:
+    response = {
+        "request_id": "request-1",
+        "summary": "attempted update",
+        "changed_paths": [path],
+        "files": [{"path": path, "content": "unsafe"}],
+        "deleted_paths": [],
+        "visible_test_result": {"status": "not_run", "summary": "not reached"},
+    }
+
+    with pytest.raises(EvaluationProtocolError, match="role-specific schema"):
+        validate_role_response("builder", "request-1", response)
+
+
+def test_builder_response_rejects_case_colliding_paths() -> None:
+    response = {
+        "request_id": "request-1",
+        "summary": "attempted updates",
+        "changed_paths": ["README.md", "readme.md"],
+        "files": [
+            {"path": "README.md", "content": "first"},
+            {"path": "readme.md", "content": "second"},
+        ],
+        "deleted_paths": [],
+        "visible_test_result": {"status": "not_run", "summary": "not reached"},
+    }
+
+    with pytest.raises(EvaluationProtocolError, match="role-specific schema"):
+        validate_role_response("builder", "request-1", response)
+
+
 def test_replay_runtime_rejects_pathlike_request_ids_before_filesystem_access(
     tmp_path: Path, smoke_task: EvalTask
 ) -> None:
