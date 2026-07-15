@@ -13,5 +13,10 @@ Do not search parent directories, the Falsiq checkout, corpus storage, or hidden
 test locations. Stay within the provided workspace and run only its visible
 tests. Stop before hidden tests are introduced.
 
-Return only one JSON object with `request_id`, `summary`, `changed_paths`, and
-`visible_test_result`. Do not wrap it in Markdown or add commentary.
+Return only one JSON object with `request_id`, `summary`, sorted `changed_paths`,
+`files`, `deleted_paths`, and `visible_test_result`. Each file contains a safe
+relative `path` and its complete UTF-8 `content`; this lets an offline replay
+materialize the exact build without invoking you again. Set optional
+`executable` true only for a newly executable file. The visible test result
+contains only `status` (`passed`, `failed`, or `not_run`) and a redacted
+`summary`. Do not wrap it in Markdown or add commentary.

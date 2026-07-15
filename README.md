@@ -114,3 +114,10 @@ uv run python eval/run.py \
 
 Use `--resume` to reuse an exact captured request/response transcript. Smoke
 tasks under `tests/fixtures/eval/` are test data, not benchmark candidates.
+
+The package API also exposes `run_conformance_evaluation` for replaying three
+isolated builder conditions and condition-blind judges. Callers supply a visible
+fixture root, an owner-private workspace root, and a hidden-test callback. Every
+builder finishes before that callback runs, so hidden corpus content is never
+mounted into a builder workspace during construction. Reports use a fixed seed
+and paired bootstrap intervals and retain only per-task numeric conformance.

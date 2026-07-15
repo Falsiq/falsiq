@@ -13,7 +13,10 @@ import hashlib
 import io
 import json
 import os
+import random
 import re
+import shutil
+import stat
 import sys
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
@@ -21,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from fractions import Fraction
 from itertools import combinations
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from statistics import fmean
 from typing import Annotated, Any, Literal, Protocol, TypeVar, cast
 
@@ -32,6 +35,7 @@ from pydantic import (
     JsonValue,
     StringConstraints,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -45,10 +49,14 @@ from .agent_runtime import (
 from .benchmark import EvalTask, PrincipalRuling, PublicTask, detect_principal_leaks, load_task
 from .score import (
     AttackEvaluation,
+    BootstrapInterval,
+    RequirementScore,
     interaction_cost,
     licensed_discretion_rate,
+    paired_bootstrap_interval,
     severity_weighted_recall,
     waste_rate,
+    weighted_conformance,
 )
 from .score import LatentRequirement as MetricRequirement
 
@@ -67,6 +75,8 @@ AGENT_ROLES = (
     "scorer",
     "naive_baseline",
     "baseline_principal",
+    "builder",
+    "judge",
 )
 MAX_INTERACTIONS_PER_ROUND = 3
 
@@ -242,6 +252,109 @@ class ScorerPayload(ContractModel):
         return self
 
 
+def _safe_relative_file(value: str) -> str:
+    if not value or "\0" in value or "\\" in value:
+        raise ValueError("changed path must be a POSIX relative file")
+    posix = PurePosixPath(value)
+    windows = PureWindowsPath(value)
+    if posix.is_absolute() or windows.is_absolute() or windows.drive:
+        raise ValueError("changed path must be relative")
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("changed path must be normalized without traversal")
+    if parts[0] in {".git", ".falsiq"}:
+        raise ValueError("builder cannot modify repository or Falsiq control data")
+    return value
+
+
+class TestResult(ContractModel):
+    status: Literal["passed", "failed", "not_run"]
+    summary: Annotated[
+        str,
+        StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=4096),
+    ]
+
+
+class FileUpdate(ContractModel):
+    path: str
+    content: Annotated[str, StringConstraints(strict=True, max_length=1_000_000)]
+    executable: bool = False
+
+    @field_validator("path")
+    @classmethod
+    def path_is_safe(cls, value: str) -> str:
+        return _safe_relative_file(value)
+
+
+class BuilderPayload(ContractModel):
+    task: PublicTask
+    candidate_id: StableToken
+    workspace: NonblankText
+    instructions: NonblankText
+
+
+class BuilderResponse(ContractModel):
+    request_id: StableToken
+    summary: NonblankText
+    changed_paths: list[str] = Field(max_length=1000)
+    files: list[FileUpdate] = Field(max_length=1000)
+    deleted_paths: list[str] = Field(max_length=1000)
+    visible_test_result: TestResult
+
+    @field_validator("changed_paths", "deleted_paths")
+    @classmethod
+    def changed_paths_are_safe(cls, values: list[str]) -> list[str]:
+        return [_safe_relative_file(value) for value in values]
+
+    @model_validator(mode="after")
+    def changed_paths_match_materialized_updates(self) -> BuilderResponse:
+        file_paths = [file.path for file in self.files]
+        if len(file_paths) != len(set(file_paths)):
+            raise ValueError("builder file update paths must be unique")
+        if len(self.deleted_paths) != len(set(self.deleted_paths)):
+            raise ValueError("builder deleted paths must be unique")
+        if set(file_paths).intersection(self.deleted_paths):
+            raise ValueError("builder cannot update and delete the same path")
+        expected = sorted([*file_paths, *self.deleted_paths])
+        if self.changed_paths != expected:
+            raise ValueError("changed_paths must be the sorted materialized path list")
+        return self
+
+
+class JudgePayload(ContractModel):
+    task: EvalTask
+    candidate_id: StableToken
+    changed_files: list[FileUpdate]
+    deleted_paths: list[str]
+    visible_test_result: TestResult
+    hidden_test_result: TestResult
+
+    @field_validator("deleted_paths")
+    @classmethod
+    def deleted_paths_are_safe(cls, values: list[str]) -> list[str]:
+        return [_safe_relative_file(value) for value in values]
+
+
+class RequirementAssessment(ContractModel):
+    requirement_id: StableToken
+    score: Literal[0.0, 0.5, 1.0]
+    rationale: NonblankText
+
+
+class JudgeResponse(ContractModel):
+    request_id: StableToken
+    requirement_scores: list[RequirementAssessment]
+    overall_rationale: NonblankText
+    evidence_gaps: list[NonblankText]
+
+    @model_validator(mode="after")
+    def requirement_scores_are_unique(self) -> JudgeResponse:
+        ids = [score.requirement_id for score in self.requirement_scores]
+        if len(ids) != len(set(ids)):
+            raise ValueError("judge requirement scores must be unique")
+        return self
+
+
 class AttackerResponse(ContractModel):
     request_id: StableToken
     attacks: list[AttackCandidate] = Field(max_length=4)
@@ -322,6 +435,8 @@ PayloadModel = (
     | ScorerPayload
     | BaselinePayload
     | BaselinePrincipalPayload
+    | BuilderPayload
+    | JudgePayload
 )
 ResponseModel = (
     AttackerResponse
@@ -330,6 +445,8 @@ ResponseModel = (
     | ScorerResponse
     | BaselineResponse
     | BaselinePrincipalResponse
+    | BuilderResponse
+    | JudgeResponse
 )
 
 _PAYLOAD_MODELS: dict[str, type[ContractModel]] = {
@@ -339,6 +456,8 @@ _PAYLOAD_MODELS: dict[str, type[ContractModel]] = {
     "scorer": ScorerPayload,
     "naive_baseline": BaselinePayload,
     "baseline_principal": BaselinePrincipalPayload,
+    "builder": BuilderPayload,
+    "judge": JudgePayload,
 }
 _RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     **{role: AttackerResponse for role in ATTACKER_ROLES},
@@ -347,6 +466,8 @@ _RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "scorer": ScorerResponse,
     "naive_baseline": BaselineResponse,
     "baseline_principal": BaselinePrincipalResponse,
+    "builder": BuilderResponse,
+    "judge": JudgeResponse,
 }
 
 
@@ -474,9 +595,62 @@ class EvaluationReport(ContractModel):
     tasks: list[TaskMetrics] = Field(min_length=1)
 
 
+class ConformanceTaskMetrics(ContractModel):
+    task_id: StableToken
+    stratum: Literal["synthetic", "mined", "control"]
+    vague_conformance: float | None
+    baseline_conformance: float | None
+    falsiq_conformance: float | None
+
+
+class ConformanceAverages(ContractModel):
+    vague: float | None
+    baseline: float | None
+    falsiq: float | None
+
+
+class BootstrapResult(ContractModel):
+    mean_delta: float
+    low: float
+    high: float
+    confidence: float
+    samples: int
+    seed: int
+    statistically_visible: bool
+
+    @classmethod
+    def from_interval(cls, interval: BootstrapInterval) -> BootstrapResult:
+        return cls(
+            mean_delta=interval.mean_delta,
+            low=interval.low,
+            high=interval.high,
+            confidence=interval.confidence,
+            samples=interval.samples,
+            seed=interval.seed,
+            statistically_visible=interval.low > 0.0,
+        )
+
+
+class ConformanceReport(ContractModel):
+    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    seed: int
+    bootstrap_samples: int = Field(ge=1)
+    elicitation: EvaluationReport
+    averages: ConformanceAverages
+    falsiq_vs_vague: BootstrapResult | None
+    falsiq_vs_baseline: BootstrapResult | None
+    tasks: list[ConformanceTaskMetrics] = Field(min_length=1)
+
+
+class HiddenTestRunner(Protocol):
+    def __call__(self, task: EvalTask, workspace: Path) -> TestResult:
+        """Run hidden tests only after every builder process has exited."""
+
+
 @dataclass(frozen=True, slots=True)
 class _ConditionOutcome:
     evaluations: tuple[AttackEvaluation, ...]
+    handoff: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -671,6 +845,71 @@ def _score_interactions(
     return _ConditionOutcome(evaluations)
 
 
+def _render_falsiq_handoff(
+    task: EvalTask,
+    interactions: Sequence[ScoringInteraction],
+) -> str:
+    lines = [
+        "# Falsiq implementation brief",
+        "",
+        "## Intent",
+        "",
+        task.vague_prompt,
+        "",
+        "## Rulings",
+    ]
+    if not interactions:
+        lines.extend(["", "No collisions were selected."])
+    for interaction in interactions:
+        assert interaction.artifact is not None
+        assert interaction.ruling is not None
+        lines.extend(
+            [
+                "",
+                f"### {interaction.interaction_id}",
+                "",
+                interaction.artifact.body,
+            ]
+        )
+        lines.extend(
+            f"- {option.key}: {option.body}" for option in interaction.artifact.options
+        )
+        ruling = interaction.ruling
+        rendered = f"- Ruling: {ruling.verdict}"
+        if ruling.choice is not None:
+            rendered += f" ({ruling.choice})"
+        lines.append(rendered)
+        if ruling.amendment_text is not None:
+            lines.append(f"- Amendment: {ruling.amendment_text}")
+    return "\n".join(lines) + "\n"
+
+
+def _render_baseline_handoff(
+    task: EvalTask,
+    exchanges: Sequence[BaselineExchange],
+) -> str:
+    lines = [
+        "# Clarification transcript",
+        "",
+        "## Intent",
+        "",
+        task.vague_prompt,
+        "",
+        "## Questions and answers",
+    ]
+    if not exchanges:
+        lines.extend(["", "No clarification questions were asked."])
+    for exchange in exchanges:
+        lines.extend(
+            [
+                "",
+                f"- Q: {exchange.question.text}",
+                f"- A: {exchange.answer}",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOutcome:
     prior_rulings: list[PublicRuling] = []
     interactions: list[ScoringInteraction] = []
@@ -780,12 +1019,16 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
         for interaction in interactions
         if interaction.ruling is not None
     }
-    return _score_interactions(
+    scored = _score_interactions(
         task,
         runtime,
         condition="falsiq",
         interactions=tuple(interactions),
         verdicts=verdicts,
+    )
+    return _ConditionOutcome(
+        evaluations=scored.evaluations,
+        handoff=_render_falsiq_handoff(task, interactions),
     )
 
 
@@ -859,12 +1102,16 @@ def _run_baseline(task: EvalTask, runtime: EvaluationAgentRuntime) -> _Condition
                     answer=answer.answer,
                 )
             )
-    return _score_interactions(
+    scored = _score_interactions(
         task,
         runtime,
         condition="baseline",
         interactions=tuple(interactions),
         verdicts={},
+    )
+    return _ConditionOutcome(
+        evaluations=scored.evaluations,
+        handoff=_render_baseline_handoff(task, exchanges),
     )
 
 
@@ -989,20 +1236,17 @@ def _aggregate_condition(
     )
 
 
-def run_evaluation(
+def _run_task_outcomes(
     tasks: Sequence[EvalTask],
-    *,
     runtime: EvaluationAgentRuntime,
-) -> EvaluationReport:
-    """Run Falsiq and a same-maximum-budget naive baseline for each task."""
-
+) -> tuple[_TaskOutcome, ...]:
     task_tuple = tuple(tasks)
     if not task_tuple:
         raise ValueError("evaluation requires at least one task")
     task_ids = [task.task_id for task in task_tuple]
     if len(task_ids) != len(set(task_ids)):
         raise ValueError("duplicate task ID in evaluation input")
-    outcomes = tuple(
+    return tuple(
         _TaskOutcome(
             task=task,
             falsiq=_run_falsiq(task, runtime),
@@ -1010,6 +1254,9 @@ def run_evaluation(
         )
         for task in task_tuple
     )
+
+
+def _evaluation_report(outcomes: tuple[_TaskOutcome, ...]) -> EvaluationReport:
     task_metrics = [
         TaskMetrics(
             task_id=outcome.task.task_id,
@@ -1032,6 +1279,377 @@ def run_evaluation(
         aggregate=AggregateMetrics(
             falsiq=_aggregate_condition(outcomes, "falsiq"),
             baseline=_aggregate_condition(outcomes, "baseline"),
+        ),
+        tasks=task_metrics,
+    )
+
+
+def run_evaluation(
+    tasks: Sequence[EvalTask],
+    *,
+    runtime: EvaluationAgentRuntime,
+) -> EvaluationReport:
+    """Run Falsiq and a same-maximum-budget naive baseline for each task."""
+
+    return _evaluation_report(_run_task_outcomes(tasks, runtime))
+
+
+_CONDITIONS = ("vague", "baseline", "falsiq")
+_WORKSPACE_MARKER = ".falsiq-eval-workspaces"
+Condition = Literal["vague", "baseline", "falsiq"]
+
+
+@dataclass(frozen=True, slots=True)
+class _BuildRecord:
+    task: EvalTask
+    condition: Condition
+    candidate_id: str
+    workspace: Path
+    response: BuilderResponse
+
+
+@dataclass(frozen=True, slots=True)
+class _JudgingRecord:
+    build: _BuildRecord
+    hidden_test_result: TestResult
+
+
+def _seeded_order(task_id: str, *, seed: int, namespace: str) -> tuple[Condition, ...]:
+    digest = hashlib.sha256(f"{seed}:{namespace}:{task_id}".encode()).digest()
+    generator = random.Random(int.from_bytes(digest[:8], "big"))
+    values = list(cast(tuple[Condition, ...], _CONDITIONS))
+    generator.shuffle(values)
+    return tuple(values)
+
+
+def _fixture_source(task: EvalTask, visible_fixture_root: Path) -> Path:
+    try:
+        root = visible_fixture_root.resolve(strict=True)
+    except OSError:
+        raise EvaluationRuntimeError("visible fixture root is missing") from None
+    unresolved = root / task.context.repo_fixture
+    try:
+        source_metadata = unresolved.lstat()
+    except OSError:
+        raise EvaluationRuntimeError(
+            f"visible fixture for task {task.task_id} is missing"
+        ) from None
+    if stat.S_ISLNK(source_metadata.st_mode) or not stat.S_ISDIR(source_metadata.st_mode):
+        raise EvaluationRuntimeError("visible fixture must be a real directory")
+    try:
+        source = unresolved.resolve(strict=True)
+    except OSError:
+        raise EvaluationRuntimeError("visible fixture cannot be resolved") from None
+    if not source.is_relative_to(root):
+        raise EvaluationRuntimeError("visible fixture escapes its configured root")
+    for item in source.rglob("*"):
+        metadata = item.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
+            raise EvaluationRuntimeError("visible fixture cannot contain symbolic links")
+        if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+            raise EvaluationRuntimeError("visible fixture contains a special filesystem entry")
+    return source
+
+
+def _prepare_task_workspace_root(root: Path, task_id: str) -> Path:
+    if root.is_symlink():
+        raise EvaluationRuntimeError("workspace root cannot be a symbolic link")
+    marker = root / _WORKSPACE_MARKER
+    if root.exists():
+        if not root.is_dir() or marker.is_symlink() or not marker.is_file():
+            raise EvaluationRuntimeError(
+                "workspace root must be a dedicated Falsiq evaluation directory"
+            )
+        try:
+            marker_contents = marker.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            raise EvaluationRuntimeError("workspace root marker is invalid") from None
+        if marker_contents != "falsiq-evaluation-workspaces-v1\n":
+            raise EvaluationRuntimeError("workspace root marker is invalid")
+    else:
+        root.mkdir(parents=True, mode=0o700)
+        _atomic_write(marker, "falsiq-evaluation-workspaces-v1\n")
+    os.chmod(root, 0o700)
+    task_root = root / task_id
+    if task_root.is_symlink():
+        raise EvaluationRuntimeError("task workspace root cannot be a symbolic link")
+    if task_root.exists():
+        if not task_root.is_dir():
+            raise EvaluationRuntimeError("task workspace root is not a directory")
+        shutil.rmtree(task_root)
+    task_root.mkdir(mode=0o700)
+    return task_root
+
+
+def _copy_visible_workspace(source: Path, destination: Path) -> None:
+    if destination.exists() or destination.is_symlink():
+        raise EvaluationRuntimeError("candidate workspace already exists")
+    try:
+        shutil.copytree(source, destination, symlinks=True)
+        os.chmod(destination, 0o700)
+    except OSError:
+        raise EvaluationRuntimeError("unable to copy visible fixture workspace") from None
+
+
+def _checked_workspace_target(workspace: Path, relative_path: str) -> Path:
+    safe_path = _safe_relative_file(relative_path)
+    root = workspace.resolve(strict=True)
+    candidate = workspace / safe_path
+    current = workspace
+    for part in PurePosixPath(safe_path).parts[:-1]:
+        current /= part
+        if current.is_symlink():
+            raise EvaluationProtocolError("builder update traverses a symbolic link")
+    resolved = candidate.resolve(strict=False)
+    if not resolved.is_relative_to(root):
+        raise EvaluationProtocolError("builder update escapes its isolated workspace")
+    return candidate
+
+
+def _materialize_builder_response(workspace: Path, response: BuilderResponse) -> None:
+    for relative_path in response.deleted_paths:
+        target = _checked_workspace_target(workspace, relative_path)
+        if target.is_symlink() or not target.is_file():
+            raise EvaluationProtocolError("builder can delete only existing regular files")
+        target.unlink()
+    for update in response.files:
+        target = _checked_workspace_target(workspace, update.path)
+        if target.is_symlink() or (target.exists() and not target.is_file()):
+            raise EvaluationProtocolError("builder can update only regular files")
+        if update.executable:
+            mode = 0o755
+        elif target.exists():
+            mode = stat.S_IMODE(target.stat().st_mode)
+        else:
+            mode = 0o644
+        _atomic_write(target, update.content)
+        os.chmod(target, mode)
+
+
+def _builder_instructions(outcome: _TaskOutcome, condition: Condition) -> str:
+    if condition == "vague":
+        return outcome.task.vague_prompt
+    if condition == "baseline":
+        return outcome.baseline.handoff
+    return outcome.falsiq.handoff
+
+
+def _build_all_conditions(
+    outcomes: tuple[_TaskOutcome, ...],
+    *,
+    runtime: EvaluationAgentRuntime,
+    visible_fixture_root: Path,
+    workspace_root: Path,
+    seed: int,
+) -> tuple[_BuildRecord, ...]:
+    records: list[_BuildRecord] = []
+    for outcome in outcomes:
+        source = _fixture_source(outcome.task, visible_fixture_root)
+        task_root = _prepare_task_workspace_root(workspace_root, outcome.task.task_id)
+        condition_order = _seeded_order(
+            outcome.task.task_id,
+            seed=seed,
+            namespace="candidate-labels",
+        )
+        by_condition = {
+            condition: f"candidate-{index}"
+            for index, condition in enumerate(condition_order, start=1)
+        }
+        for condition in condition_order:
+            candidate_id = by_condition[condition]
+            workspace = (task_root / candidate_id).resolve(strict=False)
+            _copy_visible_workspace(source, workspace)
+            request_id = _request_id(
+                outcome.task.task_id,
+                "e2e",
+                "builder",
+                candidate_id,
+            )
+            response = _invoke(
+                runtime,
+                "builder",
+                request_id,
+                BuilderPayload(
+                    task=outcome.task.public_projection(),
+                    candidate_id=candidate_id,
+                    workspace=str(workspace),
+                    instructions=_builder_instructions(outcome, condition),
+                ),
+                BuilderResponse,
+            )
+            _materialize_builder_response(workspace, response)
+            records.append(
+                _BuildRecord(
+                    task=outcome.task,
+                    condition=condition,
+                    candidate_id=candidate_id,
+                    workspace=workspace,
+                    response=response,
+                )
+            )
+    return tuple(records)
+
+
+def _run_hidden_tests(
+    builds: tuple[_BuildRecord, ...],
+    hidden_test_runner: HiddenTestRunner,
+) -> tuple[_JudgingRecord, ...]:
+    records: list[_JudgingRecord] = []
+    for build in builds:
+        try:
+            result = TestResult.model_validate(hidden_test_runner(build.task, build.workspace))
+        except (ValidationError, TypeError, ValueError):
+            raise EvaluationProtocolError("hidden test runner returned an invalid result") from None
+        records.append(_JudgingRecord(build=build, hidden_test_result=result))
+    return tuple(records)
+
+
+def _judge_all_conditions(
+    records: tuple[_JudgingRecord, ...],
+    *,
+    runtime: EvaluationAgentRuntime,
+    seed: int,
+) -> dict[tuple[str, Condition], float | None]:
+    by_task: dict[str, list[_JudgingRecord]] = {}
+    for record in records:
+        by_task.setdefault(record.build.task.task_id, []).append(record)
+    scores: dict[tuple[str, Condition], float | None] = {}
+    for task_id, task_records in by_task.items():
+        judge_order = _seeded_order(task_id, seed=seed, namespace="judge-order")
+        by_condition = {record.build.condition: record for record in task_records}
+        for condition in judge_order:
+            record = by_condition[condition]
+            build = record.build
+            request_id = _request_id(task_id, "e2e", "judge", build.candidate_id)
+            response = _invoke(
+                runtime,
+                "judge",
+                request_id,
+                JudgePayload(
+                    task=build.task,
+                    candidate_id=build.candidate_id,
+                    changed_files=build.response.files,
+                    deleted_paths=build.response.deleted_paths,
+                    visible_test_result=build.response.visible_test_result,
+                    hidden_test_result=record.hidden_test_result,
+                ),
+                JudgeResponse,
+            )
+            expected_ids = {requirement.id for requirement in build.task.latent_requirements}
+            observed_ids = {
+                assessment.requirement_id for assessment in response.requirement_scores
+            }
+            if observed_ids != expected_ids:
+                raise EvaluationProtocolError(
+                    "judge must score every latent requirement exactly once"
+                )
+            metric_scores = tuple(
+                RequirementScore(assessment.requirement_id, assessment.score)
+                for assessment in response.requirement_scores
+            )
+            scores[(task_id, condition)] = weighted_conformance(
+                _metric_requirements(build.task),
+                metric_scores,
+            )
+    return scores
+
+
+def _average(values: Iterable[float | None]) -> float | None:
+    present = [value for value in values if value is not None]
+    return fmean(present) if present else None
+
+
+def _bootstrap_result(
+    tasks: Sequence[EvalTask],
+    scores: Mapping[tuple[str, Condition], float | None],
+    *,
+    candidate: Condition,
+    baseline: Condition,
+    seed: int,
+    samples: int,
+) -> BootstrapResult | None:
+    pairs = [
+        (scores[(task.task_id, candidate)], scores[(task.task_id, baseline)])
+        for task in tasks
+        if scores[(task.task_id, candidate)] is not None
+        and scores[(task.task_id, baseline)] is not None
+    ]
+    if not pairs:
+        return None
+    interval = paired_bootstrap_interval(
+        tuple(cast(float, pair[0]) for pair in pairs),
+        tuple(cast(float, pair[1]) for pair in pairs),
+        seed=seed,
+        samples=samples,
+    )
+    return BootstrapResult.from_interval(interval)
+
+
+def run_conformance_evaluation(
+    tasks: Sequence[EvalTask],
+    *,
+    runtime: EvaluationAgentRuntime,
+    visible_fixture_root: str | os.PathLike[str],
+    workspace_root: str | os.PathLike[str],
+    hidden_test_runner: HiddenTestRunner,
+    seed: int,
+    bootstrap_samples: int = 10_000,
+) -> ConformanceReport:
+    """Run three isolated builders and condition-blind judges per task."""
+
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("conformance seed must be an integer")
+    if (
+        isinstance(bootstrap_samples, bool)
+        or not isinstance(bootstrap_samples, int)
+        or bootstrap_samples < 1
+    ):
+        raise ValueError("bootstrap_samples must be positive")
+    outcomes = _run_task_outcomes(tasks, runtime)
+    builds = _build_all_conditions(
+        outcomes,
+        runtime=runtime,
+        visible_fixture_root=Path(visible_fixture_root),
+        workspace_root=Path(workspace_root),
+        seed=seed,
+    )
+    judging_records = _run_hidden_tests(builds, hidden_test_runner)
+    scores = _judge_all_conditions(judging_records, runtime=runtime, seed=seed)
+    task_metrics = [
+        ConformanceTaskMetrics(
+            task_id=outcome.task.task_id,
+            stratum=outcome.task.stratum,
+            vague_conformance=scores[(outcome.task.task_id, "vague")],
+            baseline_conformance=scores[(outcome.task.task_id, "baseline")],
+            falsiq_conformance=scores[(outcome.task.task_id, "falsiq")],
+        )
+        for outcome in outcomes
+    ]
+    task_tuple = tuple(outcome.task for outcome in outcomes)
+    return ConformanceReport(
+        seed=seed,
+        bootstrap_samples=bootstrap_samples,
+        elicitation=_evaluation_report(outcomes),
+        averages=ConformanceAverages(
+            vague=_average(task.vague_conformance for task in task_metrics),
+            baseline=_average(task.baseline_conformance for task in task_metrics),
+            falsiq=_average(task.falsiq_conformance for task in task_metrics),
+        ),
+        falsiq_vs_vague=_bootstrap_result(
+            task_tuple,
+            scores,
+            candidate="falsiq",
+            baseline="vague",
+            seed=seed,
+            samples=bootstrap_samples,
+        ),
+        falsiq_vs_baseline=_bootstrap_result(
+            task_tuple,
+            scores,
+            candidate="falsiq",
+            baseline="baseline",
+            seed=seed,
+            samples=bootstrap_samples,
         ),
         tasks=task_metrics,
     )
@@ -1197,6 +1815,94 @@ def write_reports(
     return paths
 
 
+def _render_conformance_csv(report: ConformanceReport) -> str:
+    output = io.StringIO(newline="")
+    fields = [
+        "task_id",
+        "stratum",
+        "vague_conformance",
+        "baseline_conformance",
+        "falsiq_conformance",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\n")
+    writer.writeheader()
+    for task in report.tasks:
+        writer.writerow(
+            {
+                "task_id": task.task_id,
+                "stratum": task.stratum,
+                "vague_conformance": _format_number(task.vague_conformance),
+                "baseline_conformance": _format_number(task.baseline_conformance),
+                "falsiq_conformance": _format_number(task.falsiq_conformance),
+            }
+        )
+    return output.getvalue()
+
+
+def _render_interval(interval: BootstrapResult | None) -> str:
+    if interval is None:
+        return "n/a"
+    visible = "yes" if interval.statistically_visible else "no"
+    return (
+        f"delta {_format_number(interval.mean_delta)}, "
+        f"CI [{_format_number(interval.low)}, {_format_number(interval.high)}], "
+        f"positive interval: {visible}"
+    )
+
+
+def _render_conformance_markdown(report: ConformanceReport) -> str:
+    lines = [
+        "# Falsiq end-to-end conformance",
+        "",
+        f"Fixed seed: {report.seed}; bootstrap samples: {report.bootstrap_samples}.",
+        "",
+        f"- Falsiq vs vague: {_render_interval(report.falsiq_vs_vague)}",
+        f"- Falsiq vs naive baseline: {_render_interval(report.falsiq_vs_baseline)}",
+        "",
+        "| Task | Stratum | Vague | Naive baseline | Falsiq |",
+        "|---|---|---:|---:|---:|",
+    ]
+    lines.extend(
+        (
+            f"| {task.task_id} | {task.stratum} | "
+            f"{_format_number(task.vague_conformance)} | "
+            f"{_format_number(task.baseline_conformance)} | "
+            f"{_format_number(task.falsiq_conformance)} |"
+        )
+        for task in report.tasks
+    )
+    return "\n".join(lines) + "\n"
+
+
+def write_conformance_reports(
+    report: ConformanceReport,
+    directory: str | os.PathLike[str],
+) -> dict[str, Path]:
+    """Write redacted end-to-end JSON, CSV, and Markdown reports."""
+
+    root = Path(directory)
+    paths = {
+        "json": root / "conformance.json",
+        "csv": root / "conformance.csv",
+        "markdown": root / "conformance.md",
+    }
+    documents = {
+        "json": json.dumps(
+            report.model_dump(mode="json"),
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        "csv": _render_conformance_csv(report),
+        "markdown": _render_conformance_markdown(report),
+    }
+    for name, path in paths.items():
+        _atomic_write(path, documents[name])
+    return paths
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="falsiq-eval",
@@ -1255,10 +1961,14 @@ __all__ = [
     "EvaluationProtocolError",
     "EvaluationReport",
     "EvaluationRuntimeError",
+    "ConformanceReport",
+    "TestResult",
     "build_parser",
     "main",
+    "run_conformance_evaluation",
     "run_evaluation",
     "validate_role_payload",
     "validate_role_response",
+    "write_conformance_reports",
     "write_reports",
 ]

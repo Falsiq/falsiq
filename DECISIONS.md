@@ -72,3 +72,13 @@ attack's targets. Attacks carrying multiple targets require an explicit
 `--intent`, even when only one target remains active, so historical targets never
 make the amendment choice implicit. Re-rulings automatically supersede the
 active earlier ruling without mutating its record.
+
+## D010: Builder replays materialize explicit file updates
+
+Builder responses contain complete UTF-8 file updates and deletions, allowing a
+recorded response to reconstruct its isolated workspace without rerunning a
+model. All three builders finish before hidden tests begin. Judges receive
+opaque randomized candidate IDs, implementation changes, and visible and hidden
+test results, but never an experimental condition label. Workspace cleanup is
+limited to a dedicated owner-private root carrying a Falsiq marker; unmarked
+directories are never reaped.

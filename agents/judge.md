@@ -13,4 +13,5 @@ exactly 0, 0.5, or 1 and justify the score. Do not reward unrelated polish.
 
 Return only one JSON object with `request_id`, `requirement_scores`,
 `overall_rationale`, and `evidence_gaps`. Do not wrap it in Markdown or add
-commentary.
+commentary. Each requirement score contains `requirement_id`, `score`, and a
+non-empty `rationale`; score every supplied requirement exactly once.

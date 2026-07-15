@@ -15,11 +15,15 @@ from falsiq.evaluation import (
     AgentRuntime,
     EvaluationLeakageError,
     EvaluationProtocolError,
+    EvaluationRuntimeError,
+    run_conformance_evaluation,
     run_evaluation,
     validate_role_payload,
     validate_role_response,
+    write_conformance_reports,
     write_reports,
 )
+from falsiq.evaluation import TestResult as EvaluationTestResult
 
 FIXTURES = Path(__file__).parent / "fixtures" / "eval"
 ATTACKER_ROLES = tuple(role for role in AGENT_ROLES if role.startswith("attacker."))
@@ -198,6 +202,41 @@ class ScriptedRuntime:
                 "waste_interaction_ids": waste_ids,
                 "leaked_requirement_ids": [],
                 "rationale": "offline fixture scorer",
+            }
+        elif role == "builder":
+            instructions = str(payload["instructions"])
+            if "# Falsiq implementation brief" in instructions:
+                implementation = "falsiq"
+            elif "# Clarification transcript" in instructions:
+                implementation = "baseline"
+            else:
+                implementation = "vague"
+            response = {
+                "request_id": request.request_id,
+                "summary": "materialize the deterministic smoke implementation",
+                "changed_paths": ["implementation.txt"],
+                "files": [
+                    {"path": "implementation.txt", "content": implementation + "\n"}
+                ],
+                "deleted_paths": [],
+                "visible_test_result": {
+                    "status": "passed",
+                    "summary": "visible smoke checks passed",
+                },
+            }
+        elif role == "judge":
+            changed = payload["changed_files"]
+            implementation = str(changed[0]["content"]).strip()
+            scores = {"vague": (0.0, 0.0), "baseline": (1.0, 0.0), "falsiq": (1.0, 1.0)}
+            lr1, lr2 = scores[implementation]
+            response = {
+                "request_id": request.request_id,
+                "requirement_scores": [
+                    {"requirement_id": "LR1", "score": lr1, "rationale": "fixture evidence"},
+                    {"requirement_id": "LR2", "score": lr2, "rationale": "fixture evidence"},
+                ],
+                "overall_rationale": "condition-blind fixture judgment",
+                "evidence_gaps": [],
             }
         else:  # pragma: no cover - catches an incomplete fixture immediately
             raise AssertionError(f"unexpected role: {role}")
@@ -463,3 +502,240 @@ def test_replay_runtime_rejects_pathlike_request_ids_before_filesystem_access(
         runtime.invoke("attacker.boundary", "../escape", payload)
 
     assert not (tmp_path / "escape.json").exists()
+
+
+def test_three_condition_builds_are_isolated_and_judged_blindly(
+    tmp_path: Path, smoke_task: EvalTask
+) -> None:
+    runtime = ScriptedRuntime()
+    hidden_events: list[str] = []
+
+    def hidden_tests(task: EvalTask, workspace: Path) -> EvaluationTestResult:
+        assert task.task_id == "smoke_retry"
+        assert sum(request.role == "builder" for request in runtime.calls) == 3
+        implementation = (workspace / "implementation.txt").read_text().strip()
+        hidden_events.append(implementation)
+        return EvaluationTestResult(
+            status="passed" if implementation == "falsiq" else "failed",
+            summary="redacted hidden smoke result",
+        )
+
+    report = run_conformance_evaluation(
+        (smoke_task,),
+        runtime=runtime,
+        visible_fixture_root=Path(__file__).parents[1],
+        workspace_root=tmp_path / "workspaces",
+        hidden_test_runner=hidden_tests,
+        seed=17,
+        bootstrap_samples=500,
+    )
+
+    task = report.tasks[0]
+    assert task.vague_conformance == 0.0
+    assert task.baseline_conformance == 50.0
+    assert task.falsiq_conformance == 100.0
+    assert report.falsiq_vs_vague.mean_delta == 100.0
+    assert report.falsiq_vs_baseline.mean_delta == 50.0
+    assert report.falsiq_vs_baseline.statistically_visible is True
+    assert sorted(hidden_events) == ["baseline", "falsiq", "vague"]
+
+    builder_calls = [request for request in runtime.calls if request.role == "builder"]
+    assert len({request.payload["workspace"] for request in builder_calls}) == 3
+    assert all("latent_requirements" not in request.payload for request in builder_calls)
+    judge_calls = [request for request in runtime.calls if request.role == "judge"]
+    assert len(judge_calls) == 3
+    assert [request.payload["candidate_id"] for request in judge_calls] == [
+        "candidate-1",
+        "candidate-3",
+        "candidate-2",
+    ]
+    assert all("condition" not in request.payload for request in judge_calls)
+    assert all(
+        str(request.payload["candidate_id"]).startswith("candidate-")
+        for request in judge_calls
+    )
+    assert not (FIXTURES / "workspace" / "implementation.txt").exists()
+
+
+def test_conformance_reports_are_redacted_and_reproducible(
+    tmp_path: Path, smoke_task: EvalTask
+) -> None:
+    def hidden_tests(task: EvalTask, workspace: Path) -> EvaluationTestResult:
+        return EvaluationTestResult(status="passed", summary="hidden detail")
+
+    first = run_conformance_evaluation(
+        (smoke_task,),
+        runtime=ScriptedRuntime(),
+        visible_fixture_root=Path(__file__).parents[1],
+        workspace_root=tmp_path / "workspaces",
+        hidden_test_runner=hidden_tests,
+        seed=23,
+        bootstrap_samples=250,
+    )
+    second = run_conformance_evaluation(
+        (smoke_task,),
+        runtime=ScriptedRuntime(),
+        visible_fixture_root=Path(__file__).parents[1],
+        workspace_root=tmp_path / "workspaces",
+        hidden_test_runner=hidden_tests,
+        seed=23,
+        bootstrap_samples=250,
+    )
+
+    assert first == second
+    paths = write_conformance_reports(first, tmp_path / "reports")
+    rendered = b"\n".join(path.read_bytes() for path in paths.values()).decode()
+    assert "smoke_retry" in rendered
+    assert smoke_task.vague_prompt not in rendered
+    assert all(requirement.text not in rendered for requirement in smoke_task.latent_requirements)
+    assert "hidden detail" not in rendered
+
+
+def test_builder_and_judge_replay_is_resumable(
+    tmp_path: Path, smoke_task: EvalTask
+) -> None:
+    recordings = tmp_path / "recordings"
+
+    def hidden_tests(task: EvalTask, workspace: Path) -> EvaluationTestResult:
+        implementation = (workspace / "implementation.txt").read_text().strip()
+        return EvaluationTestResult(status="passed", summary=implementation)
+
+    expected = run_conformance_evaluation(
+        (smoke_task,),
+        runtime=ScriptedRuntime(recording_dir=recordings),
+        visible_fixture_root=Path(__file__).parents[1],
+        workspace_root=tmp_path / "workspaces",
+        hidden_test_runner=hidden_tests,
+        seed=31,
+        bootstrap_samples=100,
+    )
+    transcripts = tmp_path / "private" / "transcripts"
+    replayed = run_conformance_evaluation(
+        (smoke_task,),
+        runtime=AgentRuntime(recordings, transcripts),
+        visible_fixture_root=Path(__file__).parents[1],
+        workspace_root=tmp_path / "workspaces",
+        hidden_test_runner=hidden_tests,
+        seed=31,
+        bootstrap_samples=100,
+    )
+    assert replayed == expected
+
+    for recording in recordings.glob("*.json"):
+        recording.unlink()
+    resumed = run_conformance_evaluation(
+        (smoke_task,),
+        runtime=AgentRuntime(recordings, transcripts, resume=True),
+        visible_fixture_root=Path(__file__).parents[1],
+        workspace_root=tmp_path / "workspaces",
+        hidden_test_runner=hidden_tests,
+        seed=31,
+        bootstrap_samples=100,
+    )
+    assert resumed == expected
+
+
+def test_visible_fixture_symlinks_are_rejected_before_any_builder_runs(
+    tmp_path: Path, smoke_task: EvalTask
+) -> None:
+    visible_root = tmp_path / "visible"
+    fixture = visible_root / "fixture"
+    fixture.mkdir(parents=True)
+    secret = tmp_path / "hidden-corpus"
+    secret.mkdir()
+    (secret / "requirements.json").write_text("hidden", encoding="utf-8")
+    (fixture / "hidden-link").symlink_to(secret, target_is_directory=True)
+    payload = smoke_task.model_dump(mode="python")
+    payload["context"] = {"repo_fixture": "fixture", "notes": "visible only"}
+    task = EvalTask.model_validate(payload)
+    runtime = ScriptedRuntime()
+
+    with pytest.raises(EvaluationRuntimeError, match="symbolic links"):
+        run_conformance_evaluation(
+            (task,),
+            runtime=runtime,
+            visible_fixture_root=visible_root,
+            workspace_root=tmp_path / "workspaces",
+            hidden_test_runner=lambda task, workspace: EvaluationTestResult(
+                status="not_run", summary="not reached"
+            ),
+            seed=1,
+            bootstrap_samples=10,
+        )
+
+    assert not any(request.role == "builder" for request in runtime.calls)
+
+
+def test_preexisting_unmarked_workspace_root_is_never_deleted(
+    tmp_path: Path, smoke_task: EvalTask
+) -> None:
+    workspace_root = tmp_path / "not-dedicated"
+    workspace_root.mkdir()
+    sentinel = workspace_root / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+
+    with pytest.raises(EvaluationRuntimeError, match="dedicated"):
+        run_conformance_evaluation(
+            (smoke_task,),
+            runtime=ScriptedRuntime(),
+            visible_fixture_root=Path(__file__).parents[1],
+            workspace_root=workspace_root,
+            hidden_test_runner=lambda task, workspace: EvaluationTestResult(
+                status="not_run", summary="not reached"
+            ),
+            seed=1,
+            bootstrap_samples=10,
+        )
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_builder_path_traversal_is_rejected_without_writing_outside_workspace(
+    tmp_path: Path, smoke_task: EvalTask
+) -> None:
+    class EscapingBuilderRuntime(ScriptedRuntime):
+        def _response(self, request: AgentRequest) -> dict[str, Any]:
+            response = super()._response(request)
+            if request.role == "builder":
+                response["changed_paths"] = ["../escape.txt"]
+                response["files"] = [{"path": "../escape.txt", "content": "bad"}]
+            return response
+
+    with pytest.raises(EvaluationProtocolError, match="role-specific schema"):
+        run_conformance_evaluation(
+            (smoke_task,),
+            runtime=EscapingBuilderRuntime(),
+            visible_fixture_root=Path(__file__).parents[1],
+            workspace_root=tmp_path / "workspaces",
+            hidden_test_runner=lambda task, workspace: EvaluationTestResult(
+                status="not_run", summary="not reached"
+            ),
+            seed=1,
+            bootstrap_samples=10,
+        )
+
+    assert not (tmp_path / "workspaces" / "smoke_retry" / "escape.txt").exists()
+
+
+def test_judge_must_score_every_hidden_requirement(
+    tmp_path: Path, smoke_task: EvalTask
+) -> None:
+    class IncompleteJudgeRuntime(ScriptedRuntime):
+        def _response(self, request: AgentRequest) -> dict[str, Any]:
+            response = super()._response(request)
+            if request.role == "judge":
+                response["requirement_scores"] = response["requirement_scores"][:1]
+            return response
+
+    with pytest.raises(EvaluationProtocolError, match="every latent requirement"):
+        run_conformance_evaluation(
+            (smoke_task,),
+            runtime=IncompleteJudgeRuntime(),
+            visible_fixture_root=Path(__file__).parents[1],
+            workspace_root=tmp_path / "workspaces",
+            hidden_test_runner=lambda task, workspace: EvaluationTestResult(
+                status="passed", summary="fixture hidden tests"
+            ),
+            seed=1,
+            bootstrap_samples=10,
+        )
