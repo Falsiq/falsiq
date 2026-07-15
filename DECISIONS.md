@@ -36,6 +36,11 @@ with owner-only permissions. Commands, environment variables, stderr, and raw
 invalid stdout are neither persisted nor included in runtime errors. Replay
 matches the entire request, not only its ID.
 
+Agent stdout and stderr each have an 8 MiB acceptance limit. Both streams are
+captured in temporary files rather than unbounded in-memory buffers. A monitor
+kills and waits for a process that exceeds either limit; overflow content is
+never parsed, echoed, or written to a transcript.
+
 ## D006: Live model selection is role-bound
 
 The local live allowlist binds each agent role to one exact model identifier and

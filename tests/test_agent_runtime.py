@@ -5,16 +5,19 @@ import os
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+import falsiq.agent_runtime as agent_runtime
 from falsiq.agent_runtime import (
     AgentProcessError,
     AgentProtocolError,
     AgentRequest,
     AgentResponse,
+    AgentRuntimeError,
     AgentTimeoutError,
     AgentTranscript,
     LiveExecutionDenied,
@@ -167,6 +170,49 @@ def test_timeout_terminates_agent_without_leaking_or_capturing(tmp_path: Path) -
     assert not transcript_path.exists()
 
 
+@pytest.mark.parametrize(
+    ("mode", "error_type"),
+    [
+        ("oversized-stdout", AgentProtocolError),
+        ("oversized-stderr", AgentProcessError),
+    ],
+)
+def test_output_overflow_kills_agent_without_leaking_or_capturing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    error_type: type[AgentRuntimeError],
+) -> None:
+    transcript_path = tmp_path / "transcript.json"
+    monkeypatch.setattr(agent_runtime, "MAX_AGENT_OUTPUT_BYTES", 512)
+    started = time.monotonic()
+
+    with pytest.raises(error_type, match="output limit") as error:
+        invoke_agent(
+            [*command(mode), "513"],
+            request(),
+            timeout_seconds=4,
+            transcript_path=transcript_path,
+        )
+
+    assert time.monotonic() - started < 3
+    assert f"{mode}-super-secret" not in str(error.value)
+    assert not transcript_path.exists()
+
+
+def test_response_at_exact_output_limit_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = 512
+    monkeypatch.setattr(agent_runtime, "MAX_AGENT_OUTPUT_BYTES", limit)
+
+    response = invoke_agent([*command("sized-response"), str(limit)], request())
+
+    assert response.request_id == "request-1"
+    assert isinstance(response.response, dict)
+    assert len(response.response["padding"]) > 0
+
+
 def test_command_must_be_an_argv_sequence_not_a_shell_string() -> None:
     with pytest.raises(TypeError, match="argv sequence"):
         invoke_agent("python agent.py", request())
@@ -176,34 +222,42 @@ def test_invoke_agent_passes_an_argv_directly_and_writes_one_input_line(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     observed: dict[str, object] = {}
+    real_popen = subprocess.Popen
 
-    def fake_run(argv: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    class ProcessProxy:
+        def __init__(self, process: subprocess.Popen[bytes]) -> None:
+            self.process = process
+
+        def communicate(self, *args: object, **kwargs: object) -> tuple[bytes, bytes]:
+            observed["input"] = kwargs.get("input")
+            return self.process.communicate(*args, **kwargs)
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self.process, name)
+
+    def fake_popen(argv: tuple[str, ...], **kwargs: object) -> ProcessProxy:
         observed["argv"] = argv
         observed.update(kwargs)
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout='{"request_id":"request-1","response":{}}\n',
-            stderr="provider-log",
-        )
+        return ProcessProxy(real_popen(argv, **kwargs))
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    argv = ["agent executable", "argument with spaces", "; touch never-runs"]
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    argv = [*command("echo"), "argument with spaces", "; touch never-runs"]
 
-    invoke_agent(argv, request(), environ={"ONLY_THIS": "environment"})
+    response = invoke_agent(argv, request(), environ={"ONLY_THIS": "environment"})
 
     assert observed["argv"] == tuple(argv)
     assert observed["shell"] is False
     assert observed["env"] == {"ONLY_THIS": "environment"}
-    assert isinstance(observed["input"], str)
-    assert str(observed["input"]).count("\n") == 1
+    assert isinstance(observed["input"], bytes)
+    assert bytes(observed["input"]).count(b"\n") == 1
+    assert response.request_id == "request-1"
 
 
 def test_process_start_failure_has_a_safe_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail_to_start(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fail_to_start(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
         raise OSError("credential=start-super-secret")
 
-    monkeypatch.setattr(subprocess, "run", fail_to_start)
+    monkeypatch.setattr(subprocess, "Popen", fail_to_start)
 
     with pytest.raises(AgentProcessError) as error:
         invoke_agent(["missing-agent"], request())

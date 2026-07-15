@@ -18,9 +18,11 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from threading import Event, Thread
+from typing import Annotated, Any, BinaryIO, Literal
 
 from pydantic import (
     BaseModel,
@@ -35,6 +37,11 @@ from pydantic import (
 PROTOCOL_SCHEMA_VERSION = 1
 DEFAULT_TIMEOUT_SECONDS = 120.0
 MAX_ALLOWLIST_BYTES = 64 * 1024
+# Each protocol stream is accepted only up to 8 MiB. Disk-backed capture keeps
+# a misbehaving process from making the orchestrator buffer unbounded output in
+# memory while still leaving room for substantial structured builder responses.
+MAX_AGENT_OUTPUT_BYTES = 8 * 1024 * 1024
+_OUTPUT_MONITOR_INTERVAL_SECONDS = 0.005
 
 Identifier = Annotated[
     str,
@@ -249,6 +256,138 @@ def _validate_timeout(timeout_seconds: float) -> float:
     return normalized
 
 
+@dataclass(frozen=True)
+class _CompletedAgentProcess:
+    returncode: int
+    stdout: bytes
+
+
+def _kill_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    # The process may exit between poll() and kill().
+    with suppress(OSError):
+        process.kill()
+
+
+def _finish_aborted_process(process: subprocess.Popen[bytes]) -> None:
+    """Kill and wait without ever reading provider output into an exception."""
+
+    _kill_process(process)
+    try:
+        process.communicate()
+    except (OSError, ValueError):
+        with suppress(OSError):
+            process.wait()
+
+
+def _monitor_output_sizes(
+    process: subprocess.Popen[bytes],
+    stdout_file: BinaryIO,
+    stderr_file: BinaryIO,
+    *,
+    output_limit: int,
+    stopped: Event,
+    overflows: set[str],
+) -> None:
+    """Kill a child whose disk-backed stdout or stderr exceeds the limit."""
+
+    streams = (("stdout", stdout_file), ("stderr", stderr_file))
+    while not stopped.wait(_OUTPUT_MONITOR_INTERVAL_SECONDS):
+        for name, stream in streams:
+            try:
+                size = os.fstat(stream.fileno()).st_size
+            except OSError:
+                continue
+            if size > output_limit:
+                overflows.add(name)
+        if overflows:
+            _kill_process(process)
+            return
+
+
+def _run_bounded_agent_process(
+    command: tuple[str, ...],
+    request_bytes: bytes,
+    *,
+    timeout: float,
+    environ: dict[str, str] | None,
+    output_limit: int,
+) -> _CompletedAgentProcess:
+    """Run one child with bounded, deadlock-free, disk-backed output capture."""
+
+    with (
+        tempfile.TemporaryFile(mode="w+b") as stdout_file,
+        tempfile.TemporaryFile(mode="w+b") as stderr_file,
+    ):
+        try:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                shell=False,
+                env=environ,
+            )
+        except OSError:
+            raise AgentProcessError("agent process could not be started") from None
+
+        stopped = Event()
+        overflows: set[str] = set()
+        monitor = Thread(
+            target=_monitor_output_sizes,
+            args=(process, stdout_file, stderr_file),
+            kwargs={
+                "output_limit": output_limit,
+                "stopped": stopped,
+                "overflows": overflows,
+            },
+            name="falsiq-agent-output-monitor",
+            daemon=True,
+        )
+        monitor.start()
+        timed_out = False
+        execution_failed = False
+        try:
+            try:
+                process.communicate(input=request_bytes, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                _finish_aborted_process(process)
+            except OSError:
+                execution_failed = True
+                _finish_aborted_process(process)
+        finally:
+            stopped.set()
+            monitor.join()
+
+        if timed_out:
+            raise AgentTimeoutError("agent process timed out")
+
+        final_sizes = {
+            "stdout": os.fstat(stdout_file.fileno()).st_size,
+            "stderr": os.fstat(stderr_file.fileno()).st_size,
+        }
+        overflows.update(name for name, size in final_sizes.items() if size > output_limit)
+        if "stdout" in overflows:
+            raise AgentProtocolError("agent stdout exceeded the output limit")
+        if "stderr" in overflows:
+            raise AgentProcessError("agent stderr exceeded the output limit")
+        if execution_failed:
+            raise AgentProcessError("agent process failed during execution")
+        if process.returncode is None:
+            _finish_aborted_process(process)
+            raise AgentProcessError("agent process did not terminate cleanly")
+        if process.returncode != 0:
+            raise AgentProcessError(f"agent process failed with exit status {process.returncode}")
+
+        stdout_file.seek(0)
+        stdout = stdout_file.read(output_limit + 1)
+        if len(stdout) > output_limit:
+            raise AgentProtocolError("agent stdout exceeded the output limit")
+        return _CompletedAgentProcess(returncode=process.returncode, stdout=stdout)
+
+
 def invoke_agent(
     argv: Sequence[str],
     request: AgentRequest,
@@ -259,35 +398,27 @@ def invoke_agent(
 ) -> AgentResponse:
     """Invoke one fresh executable for one request.
 
-    ``argv`` is passed directly to :func:`subprocess.run` with ``shell=False``.
-    stdout and stderr are captured only for protocol handling and are never
-    included in exceptions or transcripts.
+    ``argv`` is passed directly to :class:`subprocess.Popen` with ``shell=False``.
+    Stdout and stderr use bounded disk-backed capture and are never included in
+    exceptions or transcripts.
     """
 
     command = _normalize_argv(argv)
     timeout = _validate_timeout(timeout_seconds)
     child_environment = None if environ is None else dict(environ)
 
+    completed = _run_bounded_agent_process(
+        command,
+        _json_line(request).encode("utf-8"),
+        timeout=timeout,
+        environ=child_environment,
+        output_limit=MAX_AGENT_OUTPUT_BYTES,
+    )
     try:
-        completed = subprocess.run(
-            command,
-            input=_json_line(request),
-            capture_output=True,
-            text=True,
-            check=False,
-            shell=False,
-            timeout=timeout,
-            env=child_environment,
-        )
-    except subprocess.TimeoutExpired:
-        raise AgentTimeoutError("agent process timed out") from None
-    except OSError:
-        raise AgentProcessError("agent process could not be started") from None
-
-    if completed.returncode != 0:
-        raise AgentProcessError(f"agent process failed with exit status {completed.returncode}")
-
-    response = parse_response(completed.stdout)
+        stdout = completed.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        raise AgentProtocolError("agent output must contain valid UTF-8") from None
+    response = parse_response(stdout)
     if response.request_id != request.request_id:
         raise AgentProtocolError("agent response request ID does not match the request ID")
 
