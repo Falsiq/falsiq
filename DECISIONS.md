@@ -248,3 +248,21 @@ licensed as agent discretion instead of silently disappearing. This mirrors the
 decision-bearing parts of the production brief without synthesizing test code
 or consulting hidden corpus content. Existing deterministic request IDs and
 condition-blind candidate labeling remain unchanged.
+
+## D022: Derived test stubs are inert requirements carriers
+
+Model-authored forbidden-test output is never accepted as executable test code.
+The validator permits only an optional literal module docstring followed by one
+or more uniquely named, synchronous, undecorated, parameterless top-level
+`test_[a-z0-9_]+` functions. A function may have only a `None` return annotation,
+an optional literal docstring, and exactly one `pass` or
+`raise NotImplementedError` placeholder with an optional literal message.
+Source-encoding declarations, imports, module assignments and calls, async or
+nested-only tests, fixtures, decorators, type comments, evaluated annotations,
+assertions, and arbitrary function bodies are rejected.
+
+These files carry a negative requirement across the derivation boundary; they
+are not ready-to-run acceptance tests. The builder must read each file fully and
+translate its requirement into a new repository-native failing test after
+inspecting local conventions. It must never execute, import, copy, or merge the
+derived file as-is.

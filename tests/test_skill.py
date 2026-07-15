@@ -249,7 +249,7 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
             ForbiddenTest(
                 ruling_id=ruling.id,
                 filename="test_no_unbounded_retry.py",
-                content="def test_no_unbounded_retry() -> None:\n    assert True\n",
+                content="def test_no_unbounded_retry() -> None:\n    pass\n",
             )
         ],
     )
@@ -370,6 +370,8 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
         "falsiq guard --case",
         "untrusted model output",
         "Inspect every generated test stub completely",
+        "Never run, import, copy, or merge them as-is",
+        "translate each forbidden behavior into a new repository-native failing test",
     )
     assert all(phrase in skill for phrase in required_skill_phrases)
     assert "uv run" not in skill

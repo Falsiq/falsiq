@@ -230,6 +230,152 @@ def test_forbidden_test_contract_rejects_unsafe_or_ambiguous_entries(
         ForbiddenTest.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "def test_placeholder() -> None:\n    pass\n",
+        (
+            '"""Inert forbidden-ruling scaffolds."""\n\n'
+            "def test_first_forbidden_behavior() -> None:\n"
+            '    """Replace this placeholder with a repository-native assertion."""\n'
+            '    raise NotImplementedError("implement from the forbidden ruling")\n\n'
+            "def test_second_forbidden_behavior():\n"
+            "    raise NotImplementedError\n"
+        ),
+    ],
+)
+def test_forbidden_test_contract_accepts_inert_top_level_pytest_scaffolds(
+    content: str,
+) -> None:
+    test = ForbiddenTest(
+        ruling_id=make_id(3),
+        filename="test_inert_scaffold.py",
+        content=content,
+    )
+
+    assert test.content == content
+
+
+@pytest.mark.parametrize(
+    ("content", "reason"),
+    [
+        (
+            'print("import-time side effect")\ndef test_placeholder() -> None:\n    pass\n',
+            "module-level",
+        ),
+        (
+            "import dangerous_plugin\ndef test_placeholder() -> None:\n    pass\n",
+            "module-level",
+        ),
+        (
+            "# coding: utf-7\ndef test_placeholder() -> None:\n    pass\n",
+            "encoding declaration",
+        ),
+        (
+            'def test_placeholder() -> None:\n    """unpaired surrogate: \ud800"""\n    pass\n',
+            "valid string|UTF-8 encodable",
+        ),
+        (
+            "def helper() -> None:\n    def test_nested_only() -> None:\n        pass\n",
+            "top-level test_",
+        ),
+        (
+            "def test_executes_model_code() -> None:\n    assert repository_call()\n",
+            "inert placeholder",
+        ),
+        (
+            "@pytest.mark.parametrize('value', [side_effect()])\n"
+            "def test_decorated(value) -> None:\n"
+            "    pass\n",
+            "decorators",
+        ),
+        (
+            "async def test_async() -> None:\n    pass\n",
+            "module-level",
+        ),
+        (
+            "def test_fixture(fixture) -> None:\n    pass\n",
+            "parameters",
+        ),
+        (
+            "def test_annotation() -> annotation_factory():\n    pass\n",
+            "return annotation",
+        ),
+        (
+            "def test_type_comment():  # type: () -> None\n    pass\n",
+            "type comments",
+        ),
+        (
+            "def test_dynamic_message() -> None:\n"
+            "    raise NotImplementedError(message_factory())\n",
+            "inert placeholder",
+        ),
+    ],
+    ids=[
+        "module-call",
+        "import-side-effect",
+        "alternate-source-encoding",
+        "invalid-utf8-scalar",
+        "nested-only",
+        "unsafe-body",
+        "decorated-parameterized",
+        "async",
+        "fixture-parameter",
+        "evaluated-annotation",
+        "function-type-comment",
+        "dynamic-raise-message",
+    ],
+)
+def test_forbidden_test_contract_rejects_executable_model_authored_scaffolds(
+    content: str,
+    reason: str,
+) -> None:
+    with pytest.raises(ValidationError, match=reason):
+        ForbiddenTest(
+            ruling_id=make_id(3),
+            filename="test_untrusted_scaffold.py",
+            content=content,
+        )
+
+
+def test_derive_submit_rejects_executable_stub_without_publishing(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo = git_repo(tmp_path / "repo")
+    ledger, intent, forbidden, _dont_care = ruled_ledger(repo)
+    request = build_derivation_request(ledger.read(), intent.case_id)
+    payload = response_for(request, forbidden, reason="Not expressible").model_dump(
+        mode="json"
+    )
+    payload["forbidden_tests"] = [
+        {
+            "ruling_id": forbidden.id,
+            "filename": "test_import_time_call.py",
+            "content": (
+                "repository_call()\n"
+                "def test_forbidden_behavior() -> None:\n"
+                "    pass\n"
+            ),
+            "unexpressible_reason": None,
+        }
+    ]
+    response_path = write_response(repo / "response.json", payload)
+    before = ledger.path.read_bytes()
+    monkeypatch.chdir(repo)
+
+    assert main(
+        ["derive", "--case", intent.case_id, "--submit", str(response_path)]
+    ) == 2
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "module-level imports or executable statements are forbidden" in output.err
+    assert ledger.path.read_bytes() == before
+    derived = repo / ".falsiq" / "cases" / intent.case_id / "derived"
+    assert not (derived / "IMPLEMENTATION_BRIEF.md").exists()
+    assert not (derived / "tests").exists()
+
+
 def test_deriver_response_rejects_extra_intent_or_duplicate_outputs() -> None:
     base = {
         "request_id": "a" * 64,
@@ -387,10 +533,12 @@ def test_amendment_text_is_rendered_verbatim_only_from_linked_ledger_facts(
 
 def test_deriver_prompt_file_matches_the_hashed_runtime_contract() -> None:
     prompt_path = Path(__file__).parents[1] / "agents" / "deriver.md"
+    skill_prompt_path = Path(__file__).parents[1] / "skill" / "references" / "deriver.md"
 
     assert prompt_path.read_text(encoding="utf-8") == DERIVER_PROMPT
+    assert skill_prompt_path.read_text(encoding="utf-8") == DERIVER_PROMPT
     assert deriver_prompt_hash() == (
-        "fc704a9b7780d12616a2db2754f9bdf2c438eac3939ee7d8da39df913f73e5a4"
+        "fbae59e3d6ad5fb37157ac391bd5a3ec8e479c91d48266d72e2b7242a460e46c"
     )
 
 

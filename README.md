@@ -186,8 +186,15 @@ falsiq derive --case CASE_ID --submit response.json
 Requests are stored at
 `.falsiq/cases/<case>/derived/<ledger-head>/request.json`. Submission rejects
 open attacks, stale heads, mismatched request IDs, unsafe or duplicate test
-names, and incomplete forbidden-ruling coverage. On success it prints the path
-to `.falsiq/cases/<case>/derived/IMPLEMENTATION_BRIEF.md`, replaces the derived
+names, executable model-authored test content, and incomplete forbidden-ruling
+coverage. Accepted stubs use a deliberately inert grammar: an optional module
+docstring and one or more undecorated, parameterless, synchronous top-level
+`test_` functions whose bodies contain only an optional docstring plus `pass` or
+a literal `NotImplementedError` placeholder. Source-encoding declarations,
+imports, assignments, decorators, fixtures, type comments, assertions, calls,
+and other executable statements are rejected. On success the command prints the
+path to
+`.falsiq/cases/<case>/derived/IMPLEMENTATION_BRIEF.md`, replaces the derived
 pytest-stub set, and appends one derivation fact. Intent and amendment text in the
 brief always comes verbatim from the ledger; response-authored text is confined
 to the clearly labeled Agent discretion and test-expressibility sections. Each
@@ -205,9 +212,11 @@ of editing derived output.
 falsiq guard --case CASE_ID
 ```
 
-Guard acceptance proves ledger and artifact integrity, not that model-authored
-test code is safe to execute. Inspect every generated stub completely before
-running or merging it.
+Guard acceptance proves ledger and artifact integrity. The derived stubs remain
+untrusted requirements carriers, not repository tests.
+Read them completely, then translate each forbidden behavior into a new
+repository-native failing test after inspecting the project's conventions.
+Never run, import, copy, or merge a derived stub as-is.
 
 Submissions for the same case serialize publication and expected-head ledger
 admission through an owner-private sidecar lock. A stale concurrent response
