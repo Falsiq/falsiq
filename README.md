@@ -18,3 +18,46 @@ uv run ruff check .
 
 The command can be run from the checkout with `uv run falsiq` or installed as
 the `falsiq` console script.
+
+## Executable agents
+
+Agent execution is a separate `falsiq-agent` program so the `falsiq` plumbing
+CLI remains model-free. Each agent is a fresh process that receives exactly one
+JSONL request on standard input and must emit exactly one JSONL response:
+
+```json
+{"role":"attacker.boundary","request_id":"r1","payload":{"case_id":"c1"}}
+{"request_id":"r1","response":{"attacks":[]}}
+```
+
+Replay is the normal mode. It requires the incoming request to match the whole
+recorded request, then atomically captures a fresh private transcript:
+
+```console
+falsiq-agent run --replay recording.json --transcript captured.json < request.jsonl
+```
+
+Live commands are argv after `--`; no shell is used. They additionally require
+`--live`, a task or case ID, a fixed model ID, a local allowlist, and a non-CI
+environment:
+
+```json
+{
+  "schema_version": 1,
+  "task_ids": ["t001"],
+  "case_ids": ["01CASE"],
+  "models": {"attacker.boundary": "provider/model-2026-07-15"}
+}
+```
+
+```console
+falsiq-agent run --live --allowlist .falsiq/live-allowlist.json \
+  --case-id 01CASE --model-id provider/model-2026-07-15 \
+  --transcript .falsiq/transcripts/r1.json -- agent-executable --flag \
+  < request.jsonl
+```
+
+The approved model and subject are passed to the adapter as
+`FALSIQ_MODEL_ID` and `FALSIQ_TASK_ID` or `FALSIQ_CASE_ID`. Keep provider
+credentials in the adapter environment, never in argv. Transcripts deliberately
+exclude argv, environment variables, stdout diagnostics, and stderr logs.

@@ -27,3 +27,18 @@ model SDK.
 Replay is the default. Live evaluation additionally requires `--live`, a local
 allowlist, fixed model identifiers, and a non-CI environment. Human-approved
 held-out task bodies remain outside the repository.
+
+## D005: Agent transcripts contain protocol data only
+
+An executable agent handles one request in one process. A successful transcript
+contains only the strict request and response objects and is atomically replaced
+with owner-only permissions. Commands, environment variables, stderr, and raw
+invalid stdout are neither persisted nor included in runtime errors. Replay
+matches the entire request, not only its ID.
+
+## D006: Live model selection is role-bound
+
+The local live allowlist binds each agent role to one exact model identifier and
+separately lists approved task and case IDs. The runtime rejects moving aliases
+such as `latest`, wildcard identifiers, symlinked allowlists, every detected CI
+environment, and any invocation without exactly one approved subject.
