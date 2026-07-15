@@ -19,6 +19,14 @@ uv run ruff check .
 The command can be run from the checkout with `uv run falsiq` or installed as
 the `falsiq` console script.
 
+## Claude Code skill
+
+The canonical Falsiq skill is [`skill/SKILL.md`](skill/SKILL.md). Claude Code
+2.1.203 and newer discovers it through the checked-in
+`.claude/skills/falsiq` directory symlink. Keeping discovery as a symlink makes
+the workflow, helper scripts, and fixtures a single source of truth instead of
+maintaining a second copy under `.claude/`.
+
 ## Executable agents
 
 Agent execution is a separate `falsiq-agent` program so the `falsiq` plumbing
