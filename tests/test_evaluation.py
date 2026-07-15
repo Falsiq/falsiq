@@ -9,6 +9,7 @@ from typing import Any, Literal
 import pytest
 from pydantic import BaseModel, ValidationError
 
+import falsiq.evaluation as evaluation_module
 from falsiq.agent_runtime import AgentRequest, AgentResponse, AgentTranscript, write_transcript
 from falsiq.benchmark import EvalTask, load_task
 from falsiq.evaluation import (
@@ -650,6 +651,121 @@ def test_three_condition_builds_are_isolated_and_judged_blindly(
         str(request.payload["candidate_id"]).startswith("candidate-") for request in judge_calls
     )
     assert not (FIXTURES / "workspace" / "implementation.txt").exists()
+
+
+def test_falsiq_builder_handoff_preserves_active_decision_evidence(
+    tmp_path: Path, smoke_task: EvalTask
+) -> None:
+    def capture_handoff(workspace_root: Path) -> str:
+        runtime = ScriptedRuntime()
+        run_conformance_evaluation(
+            (smoke_task,),
+            runtime=runtime,
+            visible_fixture_root=Path(__file__).parents[1],
+            workspace_root=workspace_root,
+            hidden_test_runner=lambda task, workspace: EvaluationTestResult(
+                status="passed", summary="redacted hidden result"
+            ),
+            seed=17,
+            bootstrap_samples=10,
+        )
+        handoffs = [
+            str(request.payload["instructions"])
+            for request in runtime.calls
+            if request.role == "builder"
+            and str(request.payload["instructions"]).startswith("# Falsiq implementation brief")
+        ]
+        assert len(handoffs) == 1
+        return handoffs[0]
+
+    handoff = capture_handoff(tmp_path / "first-workspaces")
+
+    assert handoff == capture_handoff(tmp_path / "second-workspaces")
+    assert "## Original request context (verbatim)" in handoff
+    assert smoke_task.vague_prompt in handoff
+    assert "## Intent (verbatim)" in handoff
+    assert "### Active amendment from attack `acap`" in handoff
+    assert "stop after three total attempts" in handoff
+    assert "### Superseded initial intent" not in handoff
+
+    assert "| `a404` | 1 | boundary | forbidden | `A` |" in handoff
+    assert "| `alog` | 1 | omission | dont_care | — |" in handoff
+    assert "| `acap` | 2 | boundary | amend | — |" in handoff
+    assert "### Attack `a404`" in handoff
+    assert "- Settles:" in handoff
+    assert "retry status" in handoff
+    assert "#### Artifact (`transcript`)" in handoff
+    assert "404 is retried" in handoff
+    assert "##### Choice `A`" in handoff
+    assert "allow the rendered behavior" in handoff
+    assert "##### Choice `B`" in handoff
+    assert "reject the rendered behavior" in handoff
+    assert "#### Hate scenario" in handoff
+    assert "duplicate traffic hides a persistent failure" in handoff
+    assert "- Verdict: `forbidden`" in handoff
+    assert "- Choice: `A`" in handoff
+    assert "retry logging is absent" in handoff
+    assert "operators cannot diagnose latency" in handoff
+    assert "- Verdict: `dont_care`" in handoff
+    assert "four requests occur" in handoff
+    assert "attempt cap" in handoff
+    assert "- Verdict: `amend`" in handoff
+
+    assert "## Forbidden acceptance-test obligations" in handoff
+    forbidden_section = handoff.split("## Forbidden acceptance-test obligations\n", 1)[1].split(
+        "## Agent discretion\n", 1
+    )[0]
+    assert "Acceptance tests must reject choice `A`" in forbidden_section
+    assert "allow the rendered behavior" in forbidden_section
+    assert "`alog`" not in forbidden_section
+    assert "## Agent discretion" in handoff
+    discretion_section = handoff.split("## Agent discretion\n", 1)[1]
+    assert "retry logging" in discretion_section
+    assert "licensed by `dont_care` ruling for attack `alog`" in discretion_section
+    assert "retry status" not in discretion_section
+    assert "attempt cap" not in discretion_section
+
+    assert "latent_requirements" not in handoff
+    assert "LR1" not in handoff
+    for requirement in smoke_task.latent_requirements:
+        assert requirement.discriminator not in handoff
+
+
+def test_falsiq_handoff_marks_only_the_latest_amendment_as_active(
+    smoke_task: EvalTask,
+) -> None:
+    def amendment(attack_id: str, text: str, round_number: int) -> Any:
+        attack = EvaluationAttackCandidate(
+            attack_id=attack_id,
+            klass="boundary",
+            artifact=evaluation_artifact(artifact_type="transcript"),
+            settles=["retry policy"],
+            hate_scenario="the retry behavior surprises an operator",
+            render_cost="trivial",
+        )
+        ruling = evaluation_module.PublicRuling(
+            attack_id=attack_id,
+            round=round_number,
+            verdict="amend",
+            amendment_text=text,
+        )
+        return evaluation_module._FalsiqDecision(attack=attack, ruling=ruling)
+
+    handoff = evaluation_module._render_falsiq_handoff(
+        smoke_task.public_projection(),
+        [
+            amendment("first-amendment", "first verbatim amendment", 1),
+            amendment("latest-amendment", "latest verbatim amendment", 2),
+        ],
+    )
+
+    active_intent = handoff.split("## Intent (verbatim)\n", 1)[1].split("## Rulings\n", 1)[0]
+    assert "### Active amendment from attack `latest-amendment`" in active_intent
+    assert "latest verbatim amendment" in active_intent
+    assert "first verbatim amendment" not in active_intent
+    assert smoke_task.vague_prompt not in active_intent
+    assert "### Amendment ruling for attack `first-amendment` (verbatim; superseded)" in handoff
+    assert "### Amendment ruling for attack `latest-amendment` (verbatim; active)" in handoff
 
 
 def test_conformance_reports_are_redacted_and_reproducible(

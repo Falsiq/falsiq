@@ -243,6 +243,14 @@ builder finishes before that callback runs, so hidden corpus content is never
 mounted into a builder workspace during construction. Reports use a fixed seed
 and paired bootstrap intervals and retain only per-task numeric conformance.
 
+The Falsiq builder condition receives a deterministic implementation brief
+rendered only from its public task and elicited collisions. The brief identifies
+the active verbatim intent, preserves amendment history and full ruling evidence
+(artifact, options, settled decisions, hate scenario, verdict, and choice),
+turns expressible forbidden choices into acceptance-test obligations, and
+labels `dont_care` decisions as licensed agent discretion. Hidden requirements,
+discriminators, and scorer mappings are never renderer inputs.
+
 Human-approved corpus release is a separate operator step. See
 [`eval/README.md`](eval/README.md) for the review gate, deterministic split,
 public/private materialization, and holdout access rules. The checked-in project

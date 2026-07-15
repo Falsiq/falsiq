@@ -82,3 +82,14 @@ never receive a private holdout path. The two task-source modes and their inputs
 cannot be mixed. If a holdout is inspected to guide a fix, rotate it before
 future official scoring. Do not report heldout success thresholds until human
 approval and an access-logged official run have actually occurred.
+
+## End-to-end builder handoffs
+
+The Falsiq conformance condition does not hand builders a lossy conversation
+summary. It deterministically renders the original public request, active
+verbatim amendment, complete elicited ruling evidence, expressible forbidden
+acceptance-test obligations, and explicitly licensed `dont_care` discretion.
+The renderer accepts only the public task plus public attack and ruling
+contracts; hidden requirements and scorer mappings remain available only to
+principal-simulator, scorer, and judge roles. Builder request IDs and blinded
+candidate labels keep their existing deterministic derivation.

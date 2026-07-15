@@ -229,3 +229,22 @@ components owner-only, rejects a public final directory on POSIX, and refuses
 symlinked or non-regular targets. Evaluation runtime setup uses the same guard,
 so an unsafe private-run path fails before a response is captured or an outside
 directory is chmodded.
+
+## D021: Evaluation builders receive decision-bearing Falsiq handoffs
+
+The end-to-end Falsiq condition is rendered only from the builder-visible
+`PublicTask` and elicited `AttackCandidate`/`PublicRuling` contracts. Hidden
+requirements, discriminators, scorer mappings, and principal-only metadata are
+not inputs to the renderer. The original request remains verbatim context; in
+the single-intent evaluation protocol, the latest amendment is the active
+verbatim intent and earlier amendments remain clearly labeled superseded
+evidence.
+
+Every active ruling carries its attack class, round, artifact, option meanings,
+settled decisions, hate scenario, verdict, and choice into the builder handoff.
+Forbidden choices create explicit acceptance-test obligations when the visible
+fixture can express them. Decisions settled by `dont_care` are separately
+licensed as agent discretion instead of silently disappearing. This mirrors the
+decision-bearing parts of the production brief without synthesizing test code
+or consulting hidden corpus content. Existing deterministic request IDs and
+condition-blind candidate labeling remain unchanged.

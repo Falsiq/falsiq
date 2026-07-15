@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import html
 import io
 import json
 import os
@@ -685,6 +686,12 @@ class _TaskOutcome:
     baseline: _ConditionOutcome
 
 
+@dataclass(frozen=True, slots=True)
+class _FalsiqDecision:
+    attack: AttackCandidate
+    ruling: PublicRuling
+
+
 def _request_id(task_id: str, condition: str, role: str, suffix: str) -> str:
     role_token = role.replace(".", "-").replace("_", "-")
     value = f"{task_id}-{condition}-{role_token}-{suffix}"
@@ -868,40 +875,171 @@ def _score_interactions(
     return _ConditionOutcome(evaluations)
 
 
+def _verbatim_block(value: str) -> list[str]:
+    runs = [len(match.group()) for match in re.finditer(r"`+", value)]
+    fence = "`" * max(3, (max(runs) + 1) if runs else 3)
+    return [f"{fence}text", value, fence]
+
+
+def _inline_code(value: str) -> str:
+    escaped = html.escape(value, quote=True).replace("\n", "&#10;")
+    return f"<code>{escaped}</code>"
+
+
+def _render_eval_ruling_evidence(decision: _FalsiqDecision) -> list[str]:
+    attack = decision.attack
+    ruling = decision.ruling
+    choice = f"`{ruling.choice}`" if ruling.choice is not None else "—"
+    lines = [
+        f"### Attack `{attack.attack_id}`",
+        "",
+        f"- Round: {ruling.round}",
+        f"- Class: `{attack.klass}`",
+        f"- Verdict: `{ruling.verdict}`",
+        f"- Choice: {choice}",
+        "- Settles:",
+        *[f"  - {_inline_code(item)}" for item in attack.settles],
+        "",
+        f"#### Artifact (`{attack.artifact.type}`)",
+        "",
+        *_verbatim_block(attack.artifact.body),
+        "",
+    ]
+    for option in attack.artifact.options:
+        lines.extend(
+            [
+                f"##### Choice `{option.key}`",
+                "",
+                *_verbatim_block(option.body),
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "#### Hate scenario",
+            "",
+            *_verbatim_block(attack.hate_scenario),
+            "",
+        ]
+    )
+    return lines
+
+
 def _render_falsiq_handoff(
-    task: EvalTask,
-    interactions: Sequence[ScoringInteraction],
+    task: PublicTask,
+    decisions: Sequence[_FalsiqDecision],
 ) -> str:
+    amendments = [decision for decision in decisions if decision.ruling.verdict == "amend"]
     lines = [
         "# Falsiq implementation brief",
         "",
-        "## Intent",
+        "## Original request context (verbatim)",
         "",
-        task.vague_prompt,
+        *_verbatim_block(task.vague_prompt),
         "",
-        "## Rulings",
+        "## Intent (verbatim)",
+        "",
     ]
-    if not interactions:
-        lines.extend(["", "No collisions were selected."])
-    for interaction in interactions:
-        assert interaction.artifact is not None
-        assert interaction.ruling is not None
+    if amendments:
+        active = amendments[-1]
+        assert active.ruling.amendment_text is not None
         lines.extend(
             [
+                f"### Active amendment from attack `{active.attack.attack_id}`",
                 "",
-                f"### {interaction.interaction_id}",
+                *_verbatim_block(active.ruling.amendment_text),
                 "",
-                interaction.artifact.body,
             ]
         )
-        lines.extend(f"- {option.key}: {option.body}" for option in interaction.artifact.options)
-        ruling = interaction.ruling
-        rendered = f"- Ruling: {ruling.verdict}"
-        if ruling.choice is not None:
-            rendered += f" ({ruling.choice})"
-        lines.append(rendered)
-        if ruling.amendment_text is not None:
-            lines.append(f"- Amendment: {ruling.amendment_text}")
+    else:
+        lines.extend(
+            [
+                "### Active initial intent",
+                "",
+                *_verbatim_block(task.vague_prompt),
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "## Rulings",
+            "",
+            "| Attack | Round | Class | Verdict | Choice |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    if not decisions:
+        lines.extend(["", "- No collisions were selected.", ""])
+    else:
+        for decision in decisions:
+            attack = decision.attack
+            ruling = decision.ruling
+            choice = f"`{ruling.choice}`" if ruling.choice is not None else "—"
+            lines.append(
+                f"| `{attack.attack_id}` | {ruling.round} | {attack.klass} | "
+                f"{ruling.verdict} | {choice} |"
+            )
+        lines.append("")
+
+    for index, decision in enumerate(amendments):
+        amendment = decision.ruling.amendment_text
+        assert amendment is not None
+        status = "active" if index == len(amendments) - 1 else "superseded"
+        lines.extend(
+            [
+                f"### Amendment ruling for attack `{decision.attack.attack_id}` "
+                f"(verbatim; {status})",
+                "",
+                *_verbatim_block(amendment),
+                "",
+            ]
+        )
+
+    lines.extend(["## Ruling evidence (elicited)", ""])
+    if not decisions:
+        lines.extend(["- No active rulings.", ""])
+    else:
+        for decision in decisions:
+            lines.extend(_render_eval_ruling_evidence(decision))
+
+    forbidden = [decision for decision in decisions if decision.ruling.verdict == "forbidden"]
+    lines.extend(["## Forbidden acceptance-test obligations", ""])
+    if not forbidden:
+        lines.extend(["- No active forbidden rulings.", ""])
+    else:
+        for decision in forbidden:
+            choice = decision.ruling.choice
+            assert choice is not None
+            option = next(
+                option for option in decision.attack.artifact.options if option.key == choice
+            )
+            lines.extend(
+                [
+                    f"### Attack `{decision.attack.attack_id}`",
+                    "",
+                    f"- Acceptance tests must reject choice `{choice}` when "
+                    "repository-level tests can express this observable behavior; "
+                    "otherwise record the limitation in the builder summary.",
+                    "- Forbidden behavior (verbatim):",
+                    "",
+                    *_verbatim_block(option.body),
+                    "",
+                ]
+            )
+
+    discretion = [decision for decision in decisions if decision.ruling.verdict == "dont_care"]
+    lines.extend(["## Agent discretion", ""])
+    if not discretion:
+        lines.extend(["- None recorded.", ""])
+    else:
+        for decision in discretion:
+            for settled in decision.attack.settles:
+                lines.append(
+                    f"- {_inline_code(settled)} — licensed by `dont_care` ruling "
+                    f"for attack `{decision.attack.attack_id}`."
+                )
+        lines.append("")
     return "\n".join(lines) + "\n"
 
 
@@ -934,6 +1072,7 @@ def _render_baseline_handoff(
 def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOutcome:
     prior_rulings: list[PublicRuling] = []
     interactions: list[ScoringInteraction] = []
+    decisions: list[_FalsiqDecision] = []
     seen_attack_ids: set[str] = set()
     interaction_limit = task.annoyance_budget * MAX_INTERACTIONS_PER_ROUND
     for round_number in range(1, task.annoyance_budget + 1):
@@ -1020,6 +1159,7 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
                 amendment_text=ruling.amendment_text,
             )
             prior_rulings.append(public_ruling)
+            decisions.append(_FalsiqDecision(attack=attack, ruling=public_ruling))
             interactions.append(
                 ScoringInteraction(
                     interaction_id=attack.attack_id,
@@ -1045,7 +1185,7 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
     )
     return _ConditionOutcome(
         evaluations=scored.evaluations,
-        handoff=_render_falsiq_handoff(task, interactions),
+        handoff=_render_falsiq_handoff(task.public_projection(), decisions),
     )
 
 
