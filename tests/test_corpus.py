@@ -9,6 +9,7 @@ import pytest
 from falsiq.benchmark import EvalTask
 from falsiq.corpus import (
     CorpusError,
+    HoldoutEntry,
     build_holdout_manifest,
     read_private_holdout_task,
     select_holdout,
@@ -103,6 +104,12 @@ def test_manifest_contains_only_ids_strata_and_salted_hashes() -> None:
     assert "latent_requirements" not in encoded
     assert "vague_prompt" not in encoded
     assert manifest.split_policy == {"synthetic": 3, "mined": 3, "control": 4}
+
+
+@pytest.mark.parametrize("task_id", ["../outside", "synthetic/01", "Synthetic_01"])
+def test_manifest_task_ids_cannot_address_unsafe_paths(task_id: str) -> None:
+    with pytest.raises(ValueError, match="stable lowercase token"):
+        HoldoutEntry(task_id=task_id, stratum="synthetic", salted_hash="0" * 64)
 
 
 def test_manifest_cannot_bypass_human_review_gate() -> None:

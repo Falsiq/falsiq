@@ -48,6 +48,12 @@ from .agent_runtime import (
 )
 from .benchmark import EvalTask, PrincipalRuling, PublicTask, detect_principal_leaks, load_task
 from .constraints import validate_consequence_artifact
+from .corpus import (
+    CorpusError,
+    load_holdout_manifest,
+    read_owner_secret_file,
+    read_private_holdout_task,
+)
 from .score import (
     AttackEvaluation,
     BootstrapInterval,
@@ -1901,14 +1907,55 @@ def build_parser() -> argparse.ArgumentParser:
         prog="falsiq-eval",
         description="Run the replay-only Falsiq elicitation evaluation.",
     )
-    parser.add_argument(
+    task_source = parser.add_mutually_exclusive_group(required=True)
+    task_source.add_argument(
         "--task",
         dest="tasks",
         action="append",
-        required=True,
         type=Path,
         metavar="PATH",
-        help="strict hidden-intent task JSON; repeat for multiple tasks",
+        help="development-only task JSON path; never use for private holdout tasks",
+    )
+    task_source.add_argument(
+        "--holdout-task-id",
+        dest="holdout_task_ids",
+        action="append",
+        metavar="ID",
+        help="manifest-listed private holdout task ID; repeat for multiple tasks",
+    )
+    parser.add_argument(
+        "--holdout-manifest",
+        type=Path,
+        metavar="PATH",
+        help="public salted holdout manifest (heldout mode only)",
+    )
+    parser.add_argument(
+        "--private-task-store",
+        type=Path,
+        metavar="DIR",
+        help="owner-private release tasks directory (heldout mode only)",
+    )
+    parser.add_argument(
+        "--holdout-salt-file",
+        type=Path,
+        metavar="PATH",
+        help="owner-only holdout salt file (heldout mode only)",
+    )
+    parser.add_argument(
+        "--holdout-access-log",
+        type=Path,
+        metavar="PATH",
+        help="owner-private append-only access log (heldout mode only)",
+    )
+    parser.add_argument(
+        "--holdout-actor",
+        metavar="TEXT",
+        help="operator identity recorded for holdout access (heldout mode only)",
+    )
+    parser.add_argument(
+        "--holdout-purpose",
+        metavar="TEXT",
+        help="access purpose recorded for holdout access (heldout mode only)",
     )
     parser.add_argument("--recordings", required=True, type=Path, metavar="DIR")
     parser.add_argument("--private-run-dir", required=True, type=Path, metavar="DIR")
@@ -1918,10 +1965,56 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _validate_task_mode(
+    parser: argparse.ArgumentParser,
+    arguments: argparse.Namespace,
+) -> None:
+    holdout_options = {
+        "--holdout-manifest": arguments.holdout_manifest,
+        "--private-task-store": arguments.private_task_store,
+        "--holdout-salt-file": arguments.holdout_salt_file,
+        "--holdout-access-log": arguments.holdout_access_log,
+        "--holdout-actor": arguments.holdout_actor,
+        "--holdout-purpose": arguments.holdout_purpose,
+    }
+    if arguments.holdout_task_ids is None:
+        mixed = [option for option, value in holdout_options.items() if value is not None]
+        if mixed:
+            parser.error(f"{', '.join(mixed)} may be used only with --holdout-task-id")
+        return
+    missing = [option for option, value in holdout_options.items() if value is None]
+    if missing:
+        parser.error(f"heldout mode requires {', '.join(missing)}")
+    if len(arguments.holdout_task_ids) != len(set(arguments.holdout_task_ids)):
+        parser.error("heldout task IDs must be unique")
+
+
+def _load_cli_tasks(arguments: argparse.Namespace) -> tuple[EvalTask, ...]:
+    if arguments.tasks is not None:
+        return tuple(load_task(path) for path in arguments.tasks)
+
+    manifest = load_holdout_manifest(arguments.holdout_manifest)
+    salt = read_owner_secret_file(arguments.holdout_salt_file, label="holdout salt")
+    return tuple(
+        read_private_holdout_task(
+            task_id,
+            manifest=manifest,
+            store=arguments.private_task_store,
+            salt=salt,
+            access_log=arguments.holdout_access_log,
+            actor=arguments.holdout_actor,
+            purpose=arguments.holdout_purpose,
+        )
+        for task_id in arguments.holdout_task_ids
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    arguments = build_parser().parse_args(argv)
+    parser = build_parser()
+    arguments = parser.parse_args(argv)
+    _validate_task_mode(parser, arguments)
     try:
-        tasks = tuple(load_task(path) for path in arguments.tasks)
+        tasks = _load_cli_tasks(arguments)
         runtime = AgentRuntime(
             arguments.recordings,
             arguments.private_run_dir / "transcripts",
@@ -1934,6 +2027,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except ValidationError:
         print("error: evaluation task input is invalid", file=sys.stderr)
+        return 2
+    except CorpusError as error:
+        print(f"error: {error}", file=sys.stderr)
         return 2
     except EvaluationError as error:
         print(f"error: {error}", file=sys.stderr)

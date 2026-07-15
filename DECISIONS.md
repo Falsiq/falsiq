@@ -177,3 +177,19 @@ Each active ruling instead carries the number of later facts in its case, and
 the human state view renders that value. This stable ledger age highlights
 commitments that survived substantial subsequent activity while retaining the
 ruling's canonical timestamp for chronological inspection.
+
+## D017: Heldout evaluation has an access-logged CLI mode
+
+The evaluation runner has mutually exclusive task sources. `--task` is a
+development-only path interface and is never an approved route to a private
+holdout body. Heldout mode accepts manifest task IDs and requires the public
+salted manifest, the release's owner-private `tasks/` directory, an owner-only
+salt file, an owner-private access log, and nonblank actor and purpose metadata.
+
+The runner strictly validates the manifest, reads the salt without placing it
+on the command line, and obtains each body only through
+`read_private_holdout_task`. Manifest membership is checked before logging;
+after membership succeeds, a durable log append is required before the private
+regular file is read and its canonical salted hash is verified. A logging
+failure prevents the read. This preserves the distinction between an unknown
+ID and a failed task-body attempt that burns holdout freshness.

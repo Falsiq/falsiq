@@ -18,12 +18,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
-from .benchmark import EvalTask, canonical_task_hash, load_task
+from .benchmark import EvalTask, canonical_task_hash
 from .facts import utc_timestamp
 
 _SPLIT_POLICY: dict[str, int] = {"synthetic": 3, "mined": 3, "control": 4}
 _CORPUS_POLICY: dict[str, int] = {"synthetic": 10, "mined": 10, "control": 10}
 _HEX_DIGEST_LENGTH = 64
+_TASK_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _WINDOWS_DEVICE_NAME = re.compile(r"(?i)(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?")
 
 
@@ -39,6 +40,13 @@ class HoldoutEntry(_CorpusModel):
     task_id: str
     stratum: Literal["synthetic", "mined", "control"]
     salted_hash: str
+
+    @field_validator("task_id")
+    @classmethod
+    def task_id_is_safe(cls, value: str) -> str:
+        if _TASK_ID_PATTERN.fullmatch(value) is None:
+            raise ValueError("holdout task ID must be a stable lowercase token")
+        return value
 
     @field_validator("salted_hash")
     @classmethod
@@ -660,6 +668,16 @@ def read_owner_secret_file(path: Path, *, label: str) -> bytes:
     return payload
 
 
+def load_holdout_manifest(path: Path) -> HoldoutManifest:
+    """Load one strict manifest from a regular, non-symlinked file."""
+
+    payload = _read_regular_file(path, label="holdout manifest")
+    try:
+        return HoldoutManifest.model_validate_json(payload)
+    except (ValidationError, UnicodeError, ValueError) as exc:
+        raise CorpusError("holdout manifest is invalid") from exc
+
+
 def _append_access_event(
     path: Path,
     *,
@@ -673,7 +691,12 @@ def _append_access_event(
         raise CorpusError("holdout access requires a nonblank actor and purpose")
     if "\n" in actor or "\n" in purpose:
         raise CorpusError("holdout access metadata must fit on one line")
-    path.parent.mkdir(parents=True, exist_ok=True)
+    absolute = _absolute(path)
+    parent = _require_existing_directory(
+        absolute.parent,
+        label="holdout access log parent",
+    )
+    path = parent / absolute.name
     if path.exists():
         metadata = path.lstat()
         if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
@@ -731,12 +754,12 @@ def read_private_holdout_task(
         timestamp=utc_timestamp() if timestamp is None else timestamp,
     )
 
-    task_path = store / f"{task_id}.json"
+    store_root = _require_existing_directory(store, label="private task store")
+    task_path = store_root / f"{task_id}.json"
     try:
-        if task_path.is_symlink() or not task_path.is_file():
-            raise OSError("private task is not a regular file")
-        task = load_task(task_path)
-    except (OSError, UnicodeError, ValueError) as exc:
+        payload = _read_regular_file(task_path, label=f"private holdout task {task_id}")
+        task = EvalTask.model_validate_json(payload)
+    except (CorpusError, ValidationError, UnicodeError, ValueError) as exc:
         raise CorpusError(f"could not read private holdout task {task_id}") from exc
     if task.task_id != task_id:
         raise CorpusError(f"private holdout task ID mismatch for {task_id}")
@@ -752,6 +775,7 @@ __all__ = [
     "HoldoutEntry",
     "HoldoutManifest",
     "build_holdout_manifest",
+    "load_holdout_manifest",
     "prepare_corpus_release",
     "read_private_holdout_task",
     "read_owner_secret_file",

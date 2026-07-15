@@ -50,12 +50,35 @@ directory without a public release, but cannot leave a public release that
 preceded its private counterpart. Inspect such private state before retrying;
 the tool deliberately refuses to overwrite any existing output.
 
-Pass `PRIVATE_OUTPUT/tasks` as the `store` argument to
-`read_private_holdout_task`; every attempted read must use its owner-private
-access log. The path-oriented `eval/run.py --task` interface is development-only
-and must never receive a private holdout path; official holdout orchestration
-must load each task through the logged API and pass the verified in-memory task
-to `run_evaluation`. Hardening the development CLI with a dedicated manifest
-mode is separate work. If a holdout is inspected to guide a fix, rotate it
-before future official scoring. Do not report heldout success thresholds until
-human approval and an access-logged official run have actually occurred.
+Pass `PRIVATE_OUTPUT/tasks` as the private task store. Every attempted read of a
+manifest-listed task uses its owner-private access log. Official heldout runs use
+the dedicated manifest mode; repeat `--holdout-task-id` for each selected task:
+
+```console
+uv run python eval/run.py \
+  --holdout-task-id synthetic_01 \
+  --holdout-manifest "$PWD/eval/corpus-v0/holdout-manifest.json" \
+  --private-task-store /owner-private/falsiq-corpus-v0-holdout/tasks \
+  --holdout-salt-file /owner-private/falsiq-salt \
+  --holdout-access-log /owner-private/falsiq-corpus-v0-access.jsonl \
+  --holdout-actor "$USER" \
+  --holdout-purpose "official v0 scoring" \
+  --recordings /owner-private/falsiq-recordings \
+  --private-run-dir /owner-private/falsiq-run \
+  --reports "$PWD/eval/reports-v0"
+```
+
+The salt file must be an owner-only regular file. The manifest and task store
+must not be symbolic links, and the access log must have an existing real
+parent directory. Membership is checked before an access event is written.
+After membership succeeds, the runner must durably append the event before it
+reads the task body; if logging fails, the body is not read. The body is then
+checked against its canonical salted hash. Consequently an unknown ID does not
+create an access event, while a missing, unsafe, or hash-mismatched task body
+burns freshness and does create one.
+
+The path-oriented `eval/run.py --task` interface is development-only and must
+never receive a private holdout path. The two task-source modes and their inputs
+cannot be mixed. If a holdout is inspected to guide a fix, rotate it before
+future official scoring. Do not report heldout success thresholds until human
+approval and an access-logged official run have actually occurred.

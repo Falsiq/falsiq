@@ -196,8 +196,11 @@ uv run python eval/run.py \
   --reports reports
 ```
 
-Use `--resume` to reuse an exact captured request/response transcript. Smoke
-tasks under `tests/fixtures/eval/` are test data, not benchmark candidates.
+`--task` is a development-only path interface and must never receive a private
+holdout task. Official heldout runs use the manifest-backed, access-logged mode
+documented in [`eval/README.md`](eval/README.md). Use `--resume` to reuse an
+exact captured request/response transcript. Smoke tasks under
+`tests/fixtures/eval/` are test data, not benchmark candidates.
 
 The package API also exposes `run_conformance_evaluation` for replaying three
 isolated builder conditions and condition-blind judges. Callers supply a visible
