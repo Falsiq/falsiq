@@ -17,7 +17,8 @@ uv run ruff check .
 ```
 
 The command can be run from the checkout with `uv run falsiq` or installed as
-the `falsiq` console script.
+the `falsiq` console script. The production skill always uses the installed
+console script; it does not assume the target repository is a Python project.
 
 ## Claude Code skill
 
@@ -26,6 +27,25 @@ The canonical Falsiq skill is [`skill/SKILL.md`](skill/SKILL.md). Claude Code
 `.claude/skills/falsiq` directory symlink. Keeping discovery as a symlink makes
 the workflow, helper scripts, and fixtures a single source of truth instead of
 maintaining a second copy under `.claude/`.
+
+The Python wheel and the Claude Code skill are intentionally separate
+deliverables. The wheel installs only the `falsiq` package and console scripts;
+it does not place files into a target repository. To use Falsiq elsewhere, an
+operator installs the matching tool version outside the target dependency graph
+and separately places the self-contained `skill/` directory at
+`<target>/.claude/skills/falsiq/`. For example, from outside the target repo:
+
+```console
+uv tool install /absolute/path/to/falsiq
+mkdir -p /absolute/path/to/target/.claude/skills
+cp -R /absolute/path/to/falsiq/skill /absolute/path/to/target/.claude/skills/falsiq
+```
+
+The bundled prompt references are byte-identical copies of the canonical files
+under `agents/`, enforced by tests. The skill checks for exactly `falsiq 0.1.0`
+and stops with an installation prerequisite instead of modifying target
+dependencies. In its source checkout, the checked-in symlink remains the normal
+discovery path; do not replace it with a generated second copy.
 
 ## Executable agents
 
@@ -82,6 +102,9 @@ normalization and selection, append one machine-verified round envelope and
 render its open collisions:
 
 ```console
+falsiq attack assemble --case CASE_ID --round 1 \
+  boundary.json consequence.json prototype.json conflict.json omission.json \
+  > selector-round.json
 falsiq attack add -f selector-round.json
 falsiq collide --case 01ARZ3NDEKTSV4RRFFQ69G5FAV
 ```
@@ -149,8 +172,8 @@ documented no-op because Windows does not expose the required operation.
 ## Derivation handoff
 
 The CLI never invokes a model. Emit a canonical request, give that JSON to the
-external deriver described by `agents/deriver.md`, then submit its strict JSON
-response:
+external deriver described by the canonical `agents/deriver.md` (bundled for the
+skill as `skill/references/deriver.md`), then submit its strict JSON response:
 
 ```console
 falsiq derive --case CASE_ID
@@ -174,6 +197,14 @@ exact path-to-digest mapping for its pytest stubs. The skill guard refuses an
 implementation handoff if a committed artifact is missing, edited, symlinked,
 or accompanied by an uncommitted test stub; regenerate through `derive` instead
 of editing derived output.
+
+```console
+falsiq guard --case CASE_ID
+```
+
+Guard acceptance proves ledger and artifact integrity, not that model-authored
+test code is safe to execute. Inspect every generated stub completely before
+running or merging it.
 
 Submissions for the same case serialize publication and expected-head ledger
 admission through an owner-private sidecar lock. A stale concurrent response

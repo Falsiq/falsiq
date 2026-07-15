@@ -7,10 +7,12 @@ mode-`0700` temporary directory outside the worktree.
 
 ```text
 [user requests a nontrivial change]
+$ command -v falsiq && falsiq --version
+<installed falsiq 0.1.0 console tool outside the target dependency graph>
 $ falsiq intent "<verbatim request>"
 <CASE>
 [five fresh class-specific attackers run in parallel]
-$ python <skill>/scripts/assemble_round.py --case <CASE> --round 1 <five batch files>
+$ falsiq attack assemble --case <CASE> --round 1 <five batch files>
 {"candidates":[...],"selected":["<digest>",...],...}
 $ falsiq attack add --file <round.json>
 <ATTACK IDs>
@@ -29,8 +31,9 @@ $ cat <request.json>
 [a fresh external deriver returns strict response JSON]
 $ falsiq derive --case <CASE> --submit <response.json>
 <brief path>
-$ python <skill>/scripts/guard_open_attacks.py --case <CASE>
+$ falsiq guard --case <CASE>
 .falsiq/cases/<CASE>/derived/IMPLEMENTATION_BRIEF.md
+[every generated test stub is inspected completely as untrusted model output]
 [implementation begins from IMPLEMENTATION_BRIEF.md]
 ```
 
@@ -46,7 +49,7 @@ $ falsiq outcome abandoned --case <CASE> --trace n/a --notes "User explicitly re
 
 ```text
 [all five attacker batches contain zero candidates]
-$ python <skill>/scripts/assemble_round.py --case <CASE> --round 1 <five batch files>
+$ falsiq attack assemble --case <CASE> --round 1 <five batch files>
 {"candidates":[],"selected":[],...}
 [attack add and collide are not called; derivation begins]
 ```

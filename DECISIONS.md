@@ -193,3 +193,22 @@ after membership succeeds, a durable log append is required before the private
 regular file is read and its canonical salted hash is verified. A logging
 failure prevents the read. This preserves the distinction between an unknown
 ID and a failed task-body attempt that burns holdout freshness.
+
+## D018: The installed CLI and Claude Code skill are separate deliverables
+
+The Python wheel packages deterministic plumbing only. An operator installs its
+`falsiq` console script outside a target repository's dependency graph and
+separately places the self-contained skill directory at
+`.claude/skills/falsiq/`. The production skill checks its exact compatible CLI
+version, invokes plain `falsiq`, and stops instead of installing or upgrading a
+missing or mismatched tool. It never uses a target interpreter to import
+Falsiq.
+
+Round assembly and handoff guarding therefore live in package APIs exposed as
+`falsiq attack assemble` and `falsiq guard`. Historical Python scripts are thin
+source-checkout compatibility wrappers, not production skill dependencies. The
+canonical agent prompts remain under `agents/`; byte-equal copies under
+`skill/references/` make a placed skill portable without depending on the
+Falsiq source tree. A valid guard proves committed artifact integrity, while
+model-authored test stubs remain untrusted and require complete inspection
+before execution or merge.

@@ -26,6 +26,7 @@ from .facts import AttackFact, IntentFact, RulingFact, new_ulid, utc_timestamp
 from .ledger import FalsiqError, Ledger, LedgerValidationError, canonical_fact_json
 from .rulings import RulingCommandError, build_outcome, build_ruling_batch
 from .sandbox import SandboxError, create_sandbox, reap_sandboxes, sandbox_json
+from .workflow import assemble_attack_round, canonical_selection_json, ready_brief
 
 
 def _init_command(_args: argparse.Namespace) -> int:
@@ -109,18 +110,14 @@ def _attack_add_command(args: argparse.Namespace) -> int:
     ledger = Ledger.open()
     facts = ledger.read()
     case_exists = any(
-        isinstance(fact, IntentFact)
-        and fact.source == "user"
-        and fact.id == envelope.case_id
+        isinstance(fact, IntentFact) and fact.source == "user" and fact.id == envelope.case_id
         for fact in facts
     )
     if not case_exists:
         raise LedgerValidationError(f"unknown case: {envelope.case_id}")
     ledger_head = facts[-1].id if facts else None
     existing_attacks = [
-        fact
-        for fact in facts
-        if isinstance(fact, AttackFact) and fact.case_id == envelope.case_id
+        fact for fact in facts if isinstance(fact, AttackFact) and fact.case_id == envelope.case_id
     ]
     active_rulings: dict[str, RulingFact] = {}
     for fact in facts:
@@ -134,6 +131,12 @@ def _attack_add_command(args: argparse.Namespace) -> int:
     )
     for fact in appended:
         print(fact.id)
+    return 0
+
+
+def _attack_assemble_command(args: argparse.Namespace) -> int:
+    envelope = assemble_attack_round(args.case_id, args.round_number, args.batches)
+    print(canonical_selection_json(envelope))
     return 0
 
 
@@ -231,6 +234,12 @@ def _derive_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _guard_command(args: argparse.Namespace) -> int:
+    ledger, brief = ready_brief(args.case_id)
+    print(brief.relative_to(ledger.root))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="falsiq")
     parser.add_argument(
@@ -262,6 +271,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     attack_parser = commands.add_parser("attack", help="validate and append attack rounds")
     attack_commands = attack_parser.add_subparsers(dest="attack_command", required=True)
+    attack_assemble_parser = attack_commands.add_parser(
+        "assemble",
+        help="assemble five attacker batches into a deterministic round",
+    )
+    attack_assemble_parser.add_argument("--case", dest="case_id", required=True)
+    attack_assemble_parser.add_argument(
+        "--round",
+        dest="round_number",
+        type=int,
+        choices=(1, 2),
+        required=True,
+    )
+    attack_assemble_parser.add_argument("batches", nargs="*", type=Path)
+    attack_assemble_parser.set_defaults(handler=_attack_assemble_command)
     attack_add_parser = attack_commands.add_parser("add", help="append a selector-approved round")
     attack_add_parser.add_argument("-f", "--file", type=Path, required=True)
     attack_add_parser.set_defaults(handler=_attack_add_command)
@@ -293,18 +316,12 @@ def build_parser() -> argparse.ArgumentParser:
     outcome_parser.add_argument("--notes", default="")
     outcome_parser.set_defaults(handler=_outcome_command)
 
-    sandbox_parser = commands.add_parser(
-        "sandbox", help="manage disposable prototype worktrees"
-    )
-    sandbox_commands = sandbox_parser.add_subparsers(
-        dest="sandbox_command", required=True
-    )
+    sandbox_parser = commands.add_parser("sandbox", help="manage disposable prototype worktrees")
+    sandbox_commands = sandbox_parser.add_subparsers(dest="sandbox_command", required=True)
     sandbox_new = sandbox_commands.add_parser("new", help="create a prototype worktree")
     sandbox_new.add_argument("attack_id", nargs="?", metavar="ID")
     sandbox_new.set_defaults(handler=_sandbox_new_command)
-    sandbox_reap = sandbox_commands.add_parser(
-        "reap", help="remove managed prototype worktrees"
-    )
+    sandbox_reap = sandbox_commands.add_parser("reap", help="remove managed prototype worktrees")
     sandbox_reap.add_argument(
         "--force",
         action="store_true",
@@ -316,6 +333,13 @@ def build_parser() -> argparse.ArgumentParser:
     derive_parser.add_argument("--case", dest="case_id", required=True)
     derive_parser.add_argument("--submit", type=Path)
     derive_parser.set_defaults(handler=_derive_command)
+
+    guard_parser = commands.add_parser(
+        "guard",
+        help="verify a case is ready for implementation",
+    )
+    guard_parser.add_argument("--case", dest="case_id", required=True)
+    guard_parser.set_defaults(handler=_guard_command)
     return parser
 
 
