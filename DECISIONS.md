@@ -220,3 +220,12 @@ as owner-only where those mode bits exist. Platforms without descriptor-level
 chmod retain exclusive creation, regular-file and symlink checks, and private
 output separation without calling an unavailable API; their native ACL policy
 remains an operator responsibility.
+
+## D020: Transcript capture requires a real private directory
+
+Replay and live transcripts can contain benchmark or case data. Capture walks
+every directory component without following symlinks, creates missing
+components owner-only, rejects a public final directory on POSIX, and refuses
+symlinked or non-regular targets. Evaluation runtime setup uses the same guard,
+so an unsafe private-run path fails before a response is captured or an outside
+directory is chmodded.

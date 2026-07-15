@@ -44,6 +44,7 @@ from .agent_runtime import (
     AgentRuntimeError,
     invoke_agent,
     load_transcript,
+    prepare_private_directory,
     replay_response,
 )
 from .benchmark import EvalTask, PrincipalRuling, PublicTask, detect_principal_leaks, load_task
@@ -546,8 +547,10 @@ class AgentRuntime:
         self.transcript_dir = Path(transcript_dir)
         self.resume = resume
         self.timeout_seconds = timeout_seconds
-        self.transcript_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.transcript_dir, 0o700)
+        try:
+            self.transcript_dir = prepare_private_directory(self.transcript_dir)
+        except AgentRuntimeError as error:
+            raise EvaluationRuntimeError("private transcript directory is unsafe") from error
 
     def invoke(self, role: str, request_id: str, payload: BaseModel) -> BaseModel:
         try:

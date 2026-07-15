@@ -114,6 +114,51 @@ def test_invoke_agent_round_trips_one_jsonl_request_and_captures_transcript(
     assert transcript.response == response
     assert transcript_path.read_bytes().endswith(b"\n")
     assert stat.S_IMODE(transcript_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(transcript_path.parent.stat().st_mode) == 0o700
+
+
+def test_transcript_capture_rejects_symlinked_or_public_parent_directories(
+    tmp_path: Path,
+) -> None:
+    transcript = AgentTranscript(
+        request=request(),
+        response=AgentResponse(request_id="request-1", response={"ok": True}),
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    linked_parent = tmp_path / "linked-private"
+    linked_parent.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(AgentProtocolError, match="symlink"):
+        write_transcript(linked_parent / "capture.json", transcript)
+
+    assert not (outside / "capture.json").exists()
+    public_parent = tmp_path / "public"
+    public_parent.mkdir(mode=0o755)
+    os.chmod(public_parent, 0o755)
+    with pytest.raises(AgentProtocolError, match="owner-private"):
+        write_transcript(public_parent / "capture.json", transcript)
+
+
+def test_transcript_capture_and_load_reject_symlinked_targets(tmp_path: Path) -> None:
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    os.chmod(private, 0o700)
+    outside = tmp_path / "outside.json"
+    outside.write_text("untouched\n", encoding="utf-8")
+    target = private / "capture.json"
+    target.symlink_to(outside)
+    transcript = AgentTranscript(
+        request=request(),
+        response=AgentResponse(request_id="request-1", response={"ok": True}),
+    )
+
+    with pytest.raises(AgentProtocolError, match="symlink"):
+        write_transcript(target, transcript)
+    with pytest.raises(AgentProtocolError, match="transcript schema"):
+        load_transcript(target)
+
+    assert outside.read_text(encoding="utf-8") == "untouched\n"
 
 
 @pytest.mark.parametrize(

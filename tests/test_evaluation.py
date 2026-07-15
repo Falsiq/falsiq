@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import stat
 from pathlib import Path
 from typing import Any, Literal
 
@@ -78,6 +79,21 @@ def test_evaluation_consequence_contract_enforces_the_narrative_budget() -> None
             hate_scenario="month-later maintenance becomes unsafe",
             render_cost="trivial",
         )
+
+
+def test_replay_runtime_rejects_a_symlinked_private_transcript_directory(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o755)
+    outside.chmod(0o755)
+    transcript_link = tmp_path / "transcripts"
+    transcript_link.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(EvaluationRuntimeError, match="transcript directory"):
+        AgentRuntime(tmp_path / "recordings", transcript_link)
+
+    assert stat.S_IMODE(outside.stat().st_mode) != 0o700
 
 
 class ScriptedRuntime:

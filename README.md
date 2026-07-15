@@ -91,6 +91,9 @@ The approved model and subject are passed to the adapter as
 `FALSIQ_MODEL_ID` and `FALSIQ_TASK_ID` or `FALSIQ_CASE_ID`. Keep provider
 credentials in the adapter environment, never in argv. Transcripts deliberately
 exclude argv, environment variables, stdout diagnostics, and stderr logs.
+Transcript directories are created with owner-only permissions and every path
+component must be a real directory; symlinked or pre-existing public targets are
+rejected before any protocol data is written.
 Each child stream has an 8 MiB limit. Capture is disk-backed so output cannot
 grow orchestrator memory without bound; crossing either limit kills and waits
 for the child, writes no transcript, and returns only a generic error.

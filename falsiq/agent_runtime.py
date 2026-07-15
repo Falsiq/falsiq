@@ -436,16 +436,35 @@ def write_transcript(
 ) -> None:
     """Atomically replace ``path`` with a private replay transcript."""
 
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    target = Path(os.path.abspath(os.fspath(path)))
+    parent = prepare_private_directory(target.parent)
+    try:
+        target_metadata = target.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise AgentProtocolError("private transcript target is unavailable") from exc
+    else:
+        if stat.S_ISLNK(target_metadata.st_mode):
+            raise AgentProtocolError("private transcript target must not be a symlink")
+        if not stat.S_ISREG(target_metadata.st_mode):
+            raise AgentProtocolError("private transcript target must be a regular file")
+
+    parent_metadata = parent.lstat()
     file_descriptor, temporary_name = tempfile.mkstemp(
-        dir=target.parent,
+        dir=parent,
         prefix=f".{target.name}.",
         suffix=".tmp",
         text=True,
     )
     temporary = Path(temporary_name)
     try:
+        opened_parent = parent.lstat()
+        if (parent_metadata.st_dev, parent_metadata.st_ino) != (
+            opened_parent.st_dev,
+            opened_parent.st_ino,
+        ):
+            raise AgentProtocolError("private transcript directory changed during capture")
         os.chmod(temporary, 0o600)
         with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as stream:
             file_descriptor = -1
@@ -458,6 +477,57 @@ def write_transcript(
         if file_descriptor >= 0:
             os.close(file_descriptor)
         temporary.unlink(missing_ok=True)
+
+
+def prepare_private_directory(path: str | os.PathLike[str]) -> Path:
+    """Create or validate a real owner-private directory without symlink traversal."""
+
+    target = Path(os.path.abspath(os.fspath(path)))
+    if target == Path(target.anchor):
+        raise AgentProtocolError("private transcript directory cannot be a filesystem root")
+    current = Path(target.anchor)
+    parts = target.parts[1:] if target.anchor else target.parts
+    for component in parts:
+        current /= component
+        created = False
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            try:
+                os.mkdir(current, 0o700)
+                created = True
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                raise AgentProtocolError(
+                    "private transcript directory could not be created"
+                ) from exc
+            try:
+                metadata = current.lstat()
+            except OSError as exc:
+                raise AgentProtocolError(
+                    "private transcript directory could not be inspected"
+                ) from exc
+        except OSError as exc:
+            raise AgentProtocolError(
+                "private transcript directory could not be inspected"
+            ) from exc
+        if stat.S_ISLNK(metadata.st_mode):
+            raise AgentProtocolError("private transcript directory must not contain a symlink")
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise AgentProtocolError("private transcript path must contain only directories")
+        if created:
+            try:
+                os.chmod(current, 0o700)
+            except OSError as exc:
+                raise AgentProtocolError(
+                    "private transcript directory permissions could not be set"
+                ) from exc
+
+    metadata = target.lstat()
+    if os.name != "nt" and stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise AgentProtocolError("private transcript directory must be owner-private (mode 0700)")
+    return target
 
 
 def _fsync_directory(path: Path) -> None:
@@ -475,7 +545,25 @@ def load_transcript(path: str | os.PathLike[str]) -> AgentTranscript:
     """Load and strictly validate a replay transcript."""
 
     try:
-        document = Path(path).read_text(encoding="utf-8")
+        transcript_path = Path(path)
+        metadata = transcript_path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise OSError("transcript must be a regular file")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(transcript_path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or (
+                metadata.st_dev,
+                metadata.st_ino,
+            ) != (opened.st_dev, opened.st_ino):
+                raise OSError("transcript changed while opening")
+            with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
+                descriptor = -1
+                document = stream.read()
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
         value = _load_json(document)
         return AgentTranscript.model_validate(value)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError, ValidationError):
