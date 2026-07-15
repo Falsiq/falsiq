@@ -9,8 +9,10 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -543,6 +545,50 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path)
 
 
+@contextmanager
+def _derivation_lock(derived: Path) -> Iterator[None]:
+    """Serialize publication and ledger admission for one case's stable outputs."""
+
+    path = derived / ".derive.lock"
+    if path.is_symlink():
+        raise OSError(f"derivation lock must not be a symlink: {path}")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode) or path.is_symlink():
+            raise OSError(f"derivation lock must be a regular file: {path}")
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "r+b", closefd=True) as lock_file:
+            descriptor = -1
+            if os.name == "nt":  # pragma: no cover - exercised on Windows CI
+                import msvcrt
+
+                lock_file.seek(0, os.SEEK_END)
+                if lock_file.tell() == 0:
+                    lock_file.write(b"\0")
+                    lock_file.flush()
+                    os.fsync(lock_file.fileno())
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def _publish_with_ledger_append(
     derived: Path,
     brief: str,
@@ -656,13 +702,14 @@ def submit_derivation(
         test_stub_paths=stub_relatives,
     )
     derived = _derived_root(repo_root, response.case_id)
-    _publish_with_ledger_append(
-        derived,
-        brief,
-        stubs,
-        lambda: append_batch((fact,)),
-        lambda: fact_committed(fact.id),
-    )
+    with _derivation_lock(derived):
+        _publish_with_ledger_append(
+            derived,
+            brief,
+            stubs,
+            lambda: append_batch((fact,)),
+            lambda: fact_committed(fact.id),
+        )
     return fact, derived / "IMPLEMENTATION_BRIEF.md"
 
 

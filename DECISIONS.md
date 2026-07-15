@@ -118,3 +118,7 @@ append raises after the fact committed or commit status cannot be read safely,
 the new disposable outputs remain in place rather than contradicting a possibly
 durable fact. Request files remain head-keyed so stale responses are auditable
 and cannot overwrite current output.
+
+A per-case advisory lock covers backup, publication, ledger admission, and
+rollback at the stable brief and test paths. This prevents a losing concurrent
+submission from deleting a different submission's committed artifacts.

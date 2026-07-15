@@ -151,6 +151,11 @@ active ruling also carries its ledger-owned artifact, forced-choice meanings,
 settled decisions, and hate scenario into the brief, so a choice such as `A` or
 `B` remains implementable without reopening the collision file.
 
+Submissions for the same case serialize publication and expected-head ledger
+admission through an owner-private sidecar lock. A stale concurrent response
+therefore restores the last committed brief rather than overwriting it during
+rollback.
+
 ## Offline evaluation
 
 The evaluation harness replays strict role-specific agent recordings, captures

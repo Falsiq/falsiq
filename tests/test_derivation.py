@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import stat
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 from pydantic import ValidationError
@@ -18,6 +21,7 @@ from falsiq.derive import (
     build_derivation_request,
     deriver_prompt_hash,
     render_implementation_brief,
+    submit_derivation,
 )
 from falsiq.facts import (
     Artifact,
@@ -507,6 +511,7 @@ def test_derive_submit_materializes_brief_stubs_and_derivation_fact(
     assert derivation.test_stub_paths == [
         f"cases/{intent.case_id}/derived/tests/test_forbidden_retry_on_4xx.py"
     ]
+    assert stat.S_IMODE((brief_path.parent / ".derive.lock").stat().st_mode) == 0o600
 
 
 def test_unexpressible_forbidden_ruling_is_rendered_without_a_stub(
@@ -644,6 +649,28 @@ def test_submit_refuses_symlinked_derived_paths(tmp_path: Path, monkeypatch, cap
     assert "symlink" in output.err
     assert ledger.path.read_bytes() == before
     assert list(outside.iterdir()) == []
+
+
+def test_submit_refuses_a_symlinked_derivation_lock(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo = git_repo(tmp_path / "repo")
+    ledger, intent, forbidden, _dont_care = ruled_ledger(repo)
+    request = build_derivation_request(ledger.read(), intent.case_id)
+    response = response_for(request, forbidden, reason="Not expressible")
+    path = write_response(repo / "response.json", response)
+    derived = repo / ".falsiq" / "cases" / intent.case_id / "derived"
+    derived.mkdir(parents=True)
+    outside = tmp_path / "outside-lock"
+    outside.write_text("do not lock\n", encoding="utf-8")
+    (derived / ".derive.lock").symlink_to(outside)
+    monkeypatch.chdir(repo)
+
+    assert main(["derive", "--case", intent.case_id, "--submit", str(path)]) == 2
+    output = capsys.readouterr()
+    assert "derivation lock must not be a symlink" in output.err
+    assert outside.read_text(encoding="utf-8") == "do not lock\n"
+    assert not (derived / "IMPLEMENTATION_BRIEF.md").exists()
 
 
 @pytest.mark.parametrize("preexisting", [False, True])
@@ -797,7 +824,70 @@ def test_unknown_commit_status_keeps_new_disposable_outputs(
     assert (
         derived / "tests" / "test_forbidden_retry_on_4xx.py"
     ).read_text() == new_stub
-    assert not any(item.name.startswith(".") for item in derived.iterdir())
+    assert {item.name for item in derived.iterdir() if item.name.startswith(".")} == {
+        ".derive.lock"
+    }
+
+
+def test_concurrent_submissions_cannot_roll_back_a_committed_brief(tmp_path: Path) -> None:
+    repo = git_repo(tmp_path / "repo")
+    ledger, intent, forbidden, _dont_care = ruled_ledger(repo)
+    facts = ledger.read()
+    request = build_derivation_request(facts, intent.case_id)
+    base = response_for(request, forbidden, reason="Not expressible")
+    responses = {
+        label: base.model_copy(
+            update={
+                "agent_discretion": [
+                    AgentDiscretion(
+                        decision=f"Use committed response {label}.",
+                        rationale="Identifies the winning concurrent submission.",
+                    )
+                ]
+            }
+        )
+        for label in ("A", "B")
+    }
+    derived = repo / ".falsiq" / "cases" / intent.case_id / "derived"
+    (derived / "tests").mkdir(parents=True)
+    (derived / "IMPLEMENTATION_BRIEF.md").write_text("old brief\n", encoding="utf-8")
+    a_append_started = Event()
+    b_append_started = Event()
+
+    def run_submission(label: str) -> tuple[str, bool]:
+        def append(batch):
+            if label == "A":
+                a_append_started.set()
+                b_append_started.wait(timeout=0.25)
+            else:
+                b_append_started.set()
+            return ledger.append_batch(batch, expected_head=facts[-1].id)
+
+        try:
+            submit_derivation(
+                repo,
+                facts,
+                responses[label],
+                append_batch=append,
+                fact_committed=lambda fact_id: any(
+                    fact.id == fact_id for fact in ledger.read()
+                ),
+            )
+        except LedgerValidationError:
+            return label, False
+        return label, True
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(run_submission, "A")
+        assert a_append_started.wait(timeout=2)
+        second = executor.submit(run_submission, "B")
+        results = (first.result(timeout=3), second.result(timeout=3))
+
+    committed = [label for label, success in results if success]
+    assert len(committed) == 1
+    brief = (derived / "IMPLEMENTATION_BRIEF.md").read_text(encoding="utf-8")
+    assert f"Use committed response {committed[0]}" in brief
+    assert "old brief" not in brief
 
 
 def test_submit_rejects_open_attack_even_with_a_preexisting_response(
