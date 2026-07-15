@@ -97,3 +97,19 @@ The ignored manifest sidecar lock covers the complete manifest read, Git
 mutation, and durable manifest update. POSIX directory entries are fsynced after
 atomic replacement; Windows retains advisory locking and file flushes while
 directory fsync remains a documented platform no-op.
+
+## D012: Derivation is a head-bound external handoff
+
+`derive` writes a canonical request below the observed ledger head. Its request
+ID hashes the case state, bundled deriver prompt, and response schema. The strict
+response can add only bounded agent-discretion entries and one safe test stub or
+unexpressible reason per active forbidden ruling; intent and ruling sections are
+always rendered from ledger facts.
+
+The current brief and test directory are disposable stable paths beneath the
+case. They are staged and published before an expected-head derivation append;
+confirmed failed admission restores any prior outputs byte-for-byte. If the
+append raises after the fact committed or commit status cannot be read safely,
+the new disposable outputs remain in place rather than contradicting a possibly
+durable fact. Request files remain head-keyed so stale responses are auditable
+and cannot overwrite current output.

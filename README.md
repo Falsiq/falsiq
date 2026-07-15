@@ -126,6 +126,26 @@ replaced, and followed by a directory fsync where the platform supports it.
 Windows uses its byte-range advisory lock and file flush; directory fsync is a
 documented no-op because Windows does not expose the required operation.
 
+## Derivation handoff
+
+The CLI never invokes a model. Emit a canonical request, give that JSON to the
+external deriver described by `agents/deriver.md`, then submit its strict JSON
+response:
+
+```console
+falsiq derive --case CASE_ID
+falsiq derive --case CASE_ID --submit response.json
+```
+
+Requests are stored at
+`.falsiq/cases/<case>/derived/<ledger-head>/request.json`. Submission rejects
+open attacks, stale heads, mismatched request IDs, unsafe or duplicate test
+names, and incomplete forbidden-ruling coverage. On success it prints the path
+to `.falsiq/cases/<case>/derived/IMPLEMENTATION_BRIEF.md`, replaces the derived
+pytest-stub set, and appends one derivation fact. Intent and amendment text in the
+brief always comes verbatim from the ledger; response-authored text is confined
+to the clearly labeled Agent discretion and test-expressibility sections.
+
 ## Offline evaluation
 
 The evaluation harness replays strict role-specific agent recordings, captures

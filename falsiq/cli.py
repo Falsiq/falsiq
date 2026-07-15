@@ -15,6 +15,13 @@ from .attacks import (
     append_attack_round,
     write_collision_file,
 )
+from .derive import (
+    DerivationError,
+    DeriverResponse,
+    build_derivation_request,
+    submit_derivation,
+    write_derivation_request,
+)
 from .facts import AttackFact, IntentFact, RulingFact, new_ulid, utc_timestamp
 from .ledger import FalsiqError, Ledger, LedgerValidationError, canonical_fact_json
 from .rulings import RulingCommandError, build_outcome, build_ruling_batch
@@ -177,6 +184,38 @@ def _sandbox_reap_command(args: argparse.Namespace) -> int:
     return 2 if result.failures else 0
 
 
+def _derive_command(args: argparse.Namespace) -> int:
+    ledger = Ledger.open()
+    facts = ledger.read()
+    if args.submit is None:
+        request = build_derivation_request(facts, args.case_id)
+        print(write_derivation_request(ledger.root, request))
+        return 0
+
+    response = DeriverResponse.model_validate_json(args.submit.read_bytes())
+    if response.case_id != args.case_id:
+        raise DerivationError(
+            f"response case mismatch: expected {args.case_id}, got {response.case_id}"
+        )
+    ledger_head = facts[-1].id if facts else None
+
+    def fact_committed(fact_id: str) -> bool | None:
+        try:
+            return any(fact.id == fact_id for fact in ledger.read())
+        except (FalsiqError, OSError):
+            return None
+
+    _fact, brief_path = submit_derivation(
+        ledger.root,
+        facts,
+        response,
+        append_batch=lambda batch: ledger.append_batch(batch, expected_head=ledger_head),
+        fact_committed=fact_committed,
+    )
+    print(brief_path)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="falsiq")
     parser.add_argument(
@@ -257,6 +296,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="discard changes in dirty managed prototype worktrees",
     )
     sandbox_reap.set_defaults(handler=_sandbox_reap_command)
+
+    derive_parser = commands.add_parser("derive", help="request or submit brief derivation")
+    derive_parser.add_argument("--case", dest="case_id", required=True)
+    derive_parser.add_argument("--submit", type=Path)
+    derive_parser.set_defaults(handler=_derive_command)
     return parser
 
 
@@ -272,6 +316,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {message}", file=sys.stderr)
         return 2
     except (
+        DerivationError,
         FalsiqError,
         OSError,
         RoundGateError,
