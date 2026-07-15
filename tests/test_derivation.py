@@ -289,6 +289,56 @@ def test_brief_rendering_is_order_stable_and_intent_section_is_ledger_only(
     assert first == (Path(__file__).parent / "golden" / "implementation_brief.md").read_text()
 
 
+def test_brief_preserves_the_ledger_meaning_of_each_ruling_choice(tmp_path: Path) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent()
+    probe = AttackFact(
+        id=make_id(2),
+        ts=TS,
+        case_id=intent.case_id,
+        klass="boundary",
+        targets=[intent.id],
+        artifact=Artifact(
+            type="input",
+            body="Input: an empty file",
+            options=[
+                {"key": "A", "body": "Exit 0 and emit empty output."},
+                {"key": "B", "body": 'Exit 2 with "error: empty input".'},
+            ],
+        ),
+        settles=["empty-input behavior", "empty-input exit code"],
+        silent_settles=["empty-input exit code"],
+        hate_scenario="Silent output masks an upstream pipeline failure.",
+        render_cost="trivial",
+        round=1,
+    )
+    ruling = RulingFact(
+        id=make_id(3),
+        ts=TS,
+        case_id=intent.case_id,
+        attack_id=probe.id,
+        verdict="intended",
+        choice="B",
+    )
+    ledger.append_batch([intent, probe, ruling])
+    request = build_derivation_request(ledger.read(), intent.case_id)
+    response = DeriverResponse(
+        request_id=request.request_id,
+        case_id=request.case_id,
+        ledger_head=request.ledger_head,
+    )
+
+    brief = render_implementation_brief(ledger.read(), response)
+
+    assert "## Ruling evidence (ledger)" in brief
+    assert "Input: an empty file" in brief
+    assert "Exit 0 and emit empty output." in brief
+    assert 'Exit 2 with "error: empty input".' in brief
+    assert "empty-input behavior" in brief
+    assert "Silent output masks an upstream pipeline failure." in brief
+    assert brief.index("Choice `A`") < brief.index("Choice `B`")
+
+
 def test_amendment_text_is_rendered_verbatim_only_from_linked_ledger_facts(
     tmp_path: Path,
 ) -> None:

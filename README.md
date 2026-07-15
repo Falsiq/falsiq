@@ -146,7 +146,10 @@ names, and incomplete forbidden-ruling coverage. On success it prints the path
 to `.falsiq/cases/<case>/derived/IMPLEMENTATION_BRIEF.md`, replaces the derived
 pytest-stub set, and appends one derivation fact. Intent and amendment text in the
 brief always comes verbatim from the ledger; response-authored text is confined
-to the clearly labeled Agent discretion and test-expressibility sections.
+to the clearly labeled Agent discretion and test-expressibility sections. Each
+active ruling also carries its ledger-owned artifact, forced-choice meanings,
+settled decisions, and hate scenario into the brief, so a choice such as `A` or
+`B` remains implementable without reopening the collision file.
 
 ## Offline evaluation
 

@@ -107,7 +107,9 @@ directory fsync remains a documented platform no-op.
 ID hashes the case state, bundled deriver prompt, and response schema. The strict
 response can add only bounded agent-discretion entries and one safe test stub or
 unexpressible reason per active forbidden ruling; intent and ruling sections are
-always rendered from ledger facts.
+always rendered from ledger facts. A ruling is not meaningful without its
+collision, so the brief includes the source attack's concrete artifact, option
+bodies, settled decisions, and hate scenario alongside the verdict and choice.
 
 The current brief and test directory are disposable stable paths beneath the
 case. They are staged and published before an expected-head derivation append;

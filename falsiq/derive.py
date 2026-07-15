@@ -308,6 +308,57 @@ def _escape_markdown_inline(value: str) -> str:
     return escaped.replace("\n", "&#10;")
 
 
+def _html_code(value: str) -> str:
+    return f"<code>{html.escape(value, quote=True).replace(chr(10), '&#10;')}</code>"
+
+
+def _render_ruling_evidence(attack: AttackFact, ruling: RulingFact) -> list[str]:
+    choice = f"`{ruling.choice}`" if ruling.choice is not None else "—"
+    lines = [
+        f"### Attack `{attack.id}` → ruling `{ruling.id}`",
+        "",
+        f"- Class: `{attack.klass}`",
+        f"- Verdict: `{ruling.verdict}`",
+        f"- Choice: {choice}",
+        "- Targets:",
+        *[f"  - `{target}`" for target in attack.targets],
+        "- Settles:",
+        *[f"  - {_html_code(decision)}" for decision in attack.settles],
+        "",
+        f"#### Artifact (`{attack.artifact.type}`)",
+        "",
+    ]
+    if attack.artifact.body is not None:
+        lines.extend([*_verbatim_fence(attack.artifact.body), ""])
+    if attack.artifact.path is not None:
+        lines.extend(
+            [
+                f"- Artifact path: {_html_code(attack.artifact.path)}",
+                "",
+            ]
+        )
+    for option in attack.artifact.options:
+        lines.extend([f"##### Choice `{option.key}`", ""])
+        if option.body is not None:
+            lines.extend([*_verbatim_fence(option.body), ""])
+        if option.path is not None:
+            lines.extend(
+                [
+                    f"- Choice path: {_html_code(option.path)}",
+                    "",
+                ]
+            )
+    lines.extend(
+        [
+            "#### Hate scenario",
+            "",
+            *_verbatim_fence(attack.hate_scenario),
+            "",
+        ]
+    )
+    return lines
+
+
 def _active_intents(facts: Sequence[Fact], case_id: str) -> list[IntentFact]:
     superseded = {
         fact.supersedes
@@ -389,6 +440,13 @@ def render_implementation_brief(
                     "",
                 ]
             )
+
+    lines.extend(["## Ruling evidence (ledger)", ""])
+    if not ordered_rulings:
+        lines.extend(["- No active rulings.", ""])
+    else:
+        for ruling in ordered_rulings:
+            lines.extend(_render_ruling_evidence(attacks[ruling.attack_id], ruling))
 
     by_ruling = {item.ruling_id: item for item in response.forbidden_tests}
     lines.extend(["## Forbidden → test stubs", ""])
