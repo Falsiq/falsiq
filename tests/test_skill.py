@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from falsiq.attacks import AttackCandidate, AttackCandidateBatch, build_selection_envelope
 from falsiq.derive import (
     DeriverResponse,
@@ -23,6 +25,13 @@ from falsiq.facts import (
     new_ulid,
 )
 from falsiq.ledger import Ledger
+from falsiq.workflow import (
+    AssemblyError,
+    GuardError,
+    assemble_attack_round,
+    canonical_selection_json,
+    ready_brief,
+)
 
 ROOT = Path(__file__).parents[1]
 ASSEMBLE = ROOT / "skill" / "scripts" / "assemble_round.py"
@@ -104,12 +113,16 @@ def test_assemble_round_is_input_order_independent_and_machine_verified(tmp_path
     case_id = make_id(1)
     paths = write_batches(tmp_path, case_id)
 
+    direct_first = assemble_attack_round(case_id, 1, paths)
+    direct_second = assemble_attack_round(case_id, 1, list(reversed(paths)))
     first = run_script(ASSEMBLE, "--case", case_id, "--round", 1, *paths)
     second = run_script(ASSEMBLE, "--case", case_id, "--round", 1, *reversed(paths))
 
     assert first.returncode == second.returncode == 0
     assert first.stderr == second.stderr == ""
     assert first.stdout == second.stdout
+    assert direct_first == direct_second
+    assert canonical_selection_json(direct_first) == first.stdout.strip()
     payload = json.loads(first.stdout)
     expected = build_selection_envelope(
         case_id,
@@ -124,9 +137,12 @@ def test_assemble_round_preserves_degenerate_empty_pool(tmp_path: Path) -> None:
     case_id = make_id(1)
     paths = write_batches(tmp_path, case_id, empty=True)
 
+    direct = assemble_attack_round(case_id, 1, paths)
     result = run_script(ASSEMBLE, "--case", case_id, "--round", 1, *paths)
 
     assert result.returncode == 0
+    assert direct.candidates == []
+    assert direct.selected == []
     assert json.loads(result.stdout)["candidates"] == []
     assert json.loads(result.stdout)["selected"] == []
 
@@ -146,6 +162,10 @@ def test_assemble_round_requires_exactly_one_batch_per_attacker(tmp_path: Path) 
         paths[0],
     )
 
+    with pytest.raises(AssemblyError, match="exactly five"):
+        assemble_attack_round(case_id, 1, paths[:-1])
+    with pytest.raises(AssemblyError, match="duplicate attacker"):
+        assemble_attack_round(case_id, 1, [*paths[:-1], paths[0]])
     assert missing.returncode == 2
     assert "exactly five" in missing.stderr
     assert duplicate.returncode == 2
@@ -160,6 +180,8 @@ def test_assemble_round_rejects_case_mismatch_and_symlink_input(tmp_path: Path) 
 
     mismatch = run_script(ASSEMBLE, "--case", case_id, "--round", 1, *paths)
 
+    with pytest.raises(AssemblyError, match="case mismatch"):
+        assemble_attack_round(case_id, 1, paths)
     assert mismatch.returncode == 2
     assert "case mismatch" in mismatch.stderr
 
@@ -168,6 +190,8 @@ def test_assemble_round_rejects_case_mismatch_and_symlink_input(tmp_path: Path) 
     paths[0].replace(target)
     paths[0].symlink_to(target.name)
     symlink = run_script(ASSEMBLE, "--case", case_id, "--round", 1, *paths)
+    with pytest.raises(AssemblyError, match="symlink"):
+        assemble_attack_round(case_id, 1, paths)
     assert symlink.returncode == 2
     assert "symlink" in symlink.stderr
 
@@ -186,6 +210,8 @@ def test_guard_blocks_open_attacks_and_missing_derivation(tmp_path: Path) -> Non
     ledger.append(intent)
 
     missing = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="no current derivation"):
+        ready_brief(case_id, repo)
     assert missing.returncode == 2
     assert "no current derivation" in missing.stderr
 
@@ -204,6 +230,8 @@ def test_guard_blocks_open_attacks_and_missing_derivation(tmp_path: Path) -> Non
     )
     ledger.append(probe)
     opened = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="1 open attack"):
+        ready_brief(case_id, repo)
     assert opened.returncode == 2
     assert "1 open attack" in opened.stderr
 
@@ -262,20 +290,27 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
     )
 
     allowed = run_script(GUARD, "--case", case_id, cwd=repo)
+    direct_ledger, direct_brief = ready_brief(case_id, repo)
     assert allowed.returncode == 0
     assert allowed.stderr == ""
     assert allowed.stdout.strip() == (f".falsiq/cases/{case_id}/derived/IMPLEMENTATION_BRIEF.md")
+    assert direct_ledger.root == repo.resolve()
+    assert direct_brief == repo / allowed.stdout.strip()
 
     brief = repo / allowed.stdout.strip()
     original = brief.read_bytes()
     brief.write_bytes(original + b"tampered\n")
     tampered_brief = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="digest mismatch"):
+        ready_brief(case_id, repo)
     assert tampered_brief.returncode == 2
     assert "digest mismatch" in tampered_brief.stderr
 
     brief.write_bytes(original)
     brief.unlink()
     missing_brief = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="derived brief is unavailable"):
+        ready_brief(case_id, repo)
     assert missing_brief.returncode == 2
     assert "derived brief is unavailable" in missing_brief.stderr
 
@@ -283,6 +318,8 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
     outside.write_bytes(original)
     brief.symlink_to(os.path.relpath(outside, brief.parent))
     unsafe = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="symlink"):
+        ready_brief(case_id, repo)
     assert unsafe.returncode == 2
     assert "symlink" in unsafe.stderr
 
@@ -293,12 +330,16 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
     stub_original = stub.read_bytes()
     stub.write_bytes(stub_original + b"# edited\n")
     tampered_stub = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="digest mismatch"):
+        ready_brief(case_id, repo)
     assert tampered_stub.returncode == 2
     assert "digest mismatch" in tampered_stub.stderr
 
     stub.write_bytes(stub_original)
     stub.unlink()
     missing_stub = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="missing derived test stubs"):
+        ready_brief(case_id, repo)
     assert missing_stub.returncode == 2
     assert "missing derived test stubs" in missing_stub.stderr
 
@@ -306,6 +347,8 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
     outside_stub.write_bytes(stub_original)
     stub.symlink_to(os.path.relpath(outside_stub, stub.parent))
     symlinked_stub = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="symlink"):
+        ready_brief(case_id, repo)
     assert symlinked_stub.returncode == 2
     assert "symlink" in symlinked_stub.stderr
 
@@ -314,6 +357,8 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
     extra = tests_dir / "test_uncommitted.py"
     extra.write_text("def test_extra() -> None:\n    pass\n", encoding="utf-8")
     extra_stub = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="unexpected derived test stubs"):
+        ready_brief(case_id, repo)
     assert extra_stub.returncode == 2
     assert "unexpected derived test stubs" in extra_stub.stderr
     extra.unlink()
@@ -329,7 +374,9 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
         )
     )
     after_outcome = run_script(GUARD, "--case", case_id, cwd=repo)
+    _ledger_after_outcome, brief_after_outcome = ready_brief(case_id, repo)
     assert after_outcome.returncode == 0
+    assert brief_after_outcome == brief
 
     ledger.append(
         RulingFact(
@@ -342,6 +389,8 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
         )
     )
     after_reruling = run_script(GUARD, "--case", case_id, cwd=repo)
+    with pytest.raises(GuardError, match="rulings changed after derive"):
+        ready_brief(case_id, repo)
     assert after_reruling.returncode == 2
     assert "rulings changed after derive" in after_reruling.stderr
 
