@@ -31,6 +31,7 @@ _ULID_PATTERN = re.compile(r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
 _TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(?:\d{3})?Z$")
 
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")]
+Sha256Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 OptionKey = Annotated[
     str,
     StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
@@ -292,12 +293,41 @@ class DerivationFact(FactBase):
     kind: Literal["derivation"] = "derivation"
     ledger_head: Ulid
     brief_path: SafePath
+    brief_sha256: Sha256Digest
     test_stub_paths: list[SafePath] = Field(default_factory=list)
+    test_stub_sha256: dict[SafePath, Sha256Digest]
 
     @field_validator("test_stub_paths")
     @classmethod
     def stub_paths_are_unique(cls, values: list[str]) -> list[str]:
         return _require_unique(values, name="test_stub_paths")
+
+    @model_validator(mode="after")
+    def commitments_have_exact_case_scoped_paths(self) -> DerivationFact:
+        expected_brief = f"cases/{self.case_id}/derived/IMPLEMENTATION_BRIEF.md"
+        if self.brief_path != expected_brief:
+            raise ValueError(f"derivation brief_path must equal {expected_brief}")
+
+        expected_parent = f"cases/{self.case_id}/derived/tests"
+        for path in self.test_stub_paths:
+            parsed = PurePosixPath(path)
+            if parsed.parent.as_posix() != expected_parent:
+                raise ValueError(
+                    f"derivation test stub must be directly beneath {expected_parent}: {path}"
+                )
+            if re.fullmatch(r"test_[a-z0-9_]+\.py", parsed.name) is None:
+                raise ValueError(f"derivation test stub has an invalid filename: {path}")
+
+        paths = set(self.test_stub_paths)
+        digested_paths = set(self.test_stub_sha256)
+        if paths != digested_paths:
+            missing = sorted(paths.difference(digested_paths))
+            extra = sorted(digested_paths.difference(paths))
+            raise ValueError(
+                "derivation test stub paths and digest keys must match exactly; "
+                f"missing={missing}, extra={extra}"
+            )
+        return self
 
 
 class OutcomeFact(FactBase):
@@ -346,6 +376,7 @@ __all__ = [
     "OutcomeFact",
     "RulingFact",
     "SafePath",
+    "Sha256Digest",
     "Ulid",
     "new_ulid",
     "parse_fact",

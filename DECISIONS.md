@@ -155,3 +155,17 @@ disposable production candidates, and evaluation candidates therefore share the
 same executable rule: the artifact is an inline `scenario` body of at most 150
 whitespace-delimited words. Path-only or differently typed artifacts are
 rejected before selection or append rather than relying on prompt compliance.
+
+## D015: Derivation facts commit exact artifact bytes
+
+A derivation fact carries a canonical lowercase SHA-256 digest for the stable
+brief and a path-to-digest mapping whose keys exactly equal its test-stub path
+list. The brief path and every stub path have one case-scoped canonical form.
+Submission hashes the same UTF-8 bytes it stages for publication, so the ledger
+commitment and installed files cannot diverge through a second encoding step.
+
+Derived output remains disposable but is not editable. Before implementation,
+the skill guard verifies regular non-symlinked path components, the brief and
+stub content digests, and the exact test-directory membership. Missing, changed,
+symlinked, or extra artifacts require re-derivation; request directories and the
+per-case derivation lock are outside the committed artifact set.

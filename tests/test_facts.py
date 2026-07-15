@@ -26,6 +26,8 @@ INTENT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
 ATTACK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
 RULING_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY"
 FACT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ"
+BRIEF_DIGEST = "a" * 64
+STUB_DIGEST = "b" * 64
 
 
 def base_fields(*, fact_id: str = FACT_ID) -> dict[str, object]:
@@ -346,7 +348,9 @@ def test_derivation_rejects_paths_that_can_escape_the_project(path: str) -> None
             **base_fields(),
             ledger_head=RULING_ID,
             brief_path=path,
+            brief_sha256=BRIEF_DIGEST,
             test_stub_paths=[],
+            test_stub_sha256={},
         )
 
 
@@ -355,18 +359,72 @@ def test_derivation_paths_are_relative_unique_and_nonempty() -> None:
         **base_fields(),
         ledger_head=RULING_ID,
         brief_path=f"cases/{CASE_ID}/derived/IMPLEMENTATION_BRIEF.md",
+        brief_sha256=BRIEF_DIGEST,
         test_stub_paths=[f"cases/{CASE_ID}/derived/tests/test_forbidden.py"],
+        test_stub_sha256={
+            f"cases/{CASE_ID}/derived/tests/test_forbidden.py": STUB_DIGEST
+        },
     )
 
     assert fact.test_stub_paths == [f"cases/{CASE_ID}/derived/tests/test_forbidden.py"]
+    assert fact.brief_sha256 == BRIEF_DIGEST
+    assert fact.test_stub_sha256 == {
+        f"cases/{CASE_ID}/derived/tests/test_forbidden.py": STUB_DIGEST
+    }
 
     with pytest.raises(ValidationError):
         DerivationFact(
             **base_fields(),
             ledger_head=RULING_ID,
             brief_path="brief.md",
+            brief_sha256=BRIEF_DIGEST,
             test_stub_paths=["test_a.py", "test_a.py"],
+            test_stub_sha256={"test_a.py": STUB_DIGEST},
         )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"brief_sha256": "A" * 64},
+        {"brief_sha256": "a" * 63},
+        {"brief_path": f"cases/{CASE_ID}/derived/brief.md"},
+        {
+            "test_stub_sha256": {},
+        },
+        {
+            "test_stub_sha256": {
+                f"cases/{CASE_ID}/derived/tests/test_other.py": STUB_DIGEST
+            },
+        },
+        {
+            "test_stub_sha256": {
+                f"cases/{CASE_ID}/derived/tests/test_forbidden.py": "B" * 64
+            },
+        },
+        {
+            "test_stub_paths": [f"cases/{CASE_ID}/derived/nested/test_forbidden.py"],
+            "test_stub_sha256": {
+                f"cases/{CASE_ID}/derived/nested/test_forbidden.py": STUB_DIGEST
+            },
+        },
+    ],
+)
+def test_derivation_requires_exact_canonical_artifact_commitments(
+    updates: dict[str, object],
+) -> None:
+    stub_path = f"cases/{CASE_ID}/derived/tests/test_forbidden.py"
+    payload: dict[str, object] = {
+        **base_fields(),
+        "ledger_head": RULING_ID,
+        "brief_path": f"cases/{CASE_ID}/derived/IMPLEMENTATION_BRIEF.md",
+        "brief_sha256": BRIEF_DIGEST,
+        "test_stub_paths": [stub_path],
+        "test_stub_sha256": {stub_path: STUB_DIGEST},
+    }
+
+    with pytest.raises(ValidationError):
+        DerivationFact.model_validate(payload | updates)
 
 
 @pytest.mark.parametrize(
@@ -426,9 +484,19 @@ def test_fact_union_round_trips_all_kinds_and_forbids_unknown_fields() -> None:
             render_cost="trivial",
             round=1,
         ),
-        RulingFact(**base_fields(), attack_id=ATTACK_ID, verdict="dont_care", supersedes=RULING_ID),
-        DerivationFact(**base_fields(), ledger_head=RULING_ID, brief_path="derived/brief.md"),
-        OutcomeFact(**base_fields(), otype="accepted", trace="n/a", notes="No rework needed."),
+        RulingFact(
+            **base_fields(), attack_id=ATTACK_ID, verdict="dont_care", supersedes=RULING_ID
+        ),
+        DerivationFact(
+            **base_fields(),
+            ledger_head=RULING_ID,
+            brief_path=f"cases/{CASE_ID}/derived/IMPLEMENTATION_BRIEF.md",
+            brief_sha256=BRIEF_DIGEST,
+            test_stub_sha256={},
+        ),
+        OutcomeFact(
+            **base_fields(), otype="accepted", trace="n/a", notes="No rework needed."
+        ),
     ]
 
     for fact in facts:

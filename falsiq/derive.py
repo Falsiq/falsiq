@@ -591,8 +591,8 @@ def _derivation_lock(derived: Path) -> Iterator[None]:
 
 def _publish_with_ledger_append(
     derived: Path,
-    brief: str,
-    stubs: Mapping[str, str],
+    brief: bytes,
+    stubs: Mapping[str, bytes],
     append_fact: Callable[[], object],
     commit_status: Callable[[], bool | None],
 ) -> None:
@@ -618,9 +618,9 @@ def _publish_with_ledger_append(
         staged_brief = staging / "IMPLEMENTATION_BRIEF.md"
         staged_tests = staging / "tests"
         staged_tests.mkdir()
-        _write_staged_file(staged_brief, brief.encode("utf-8"))
+        _write_staged_file(staged_brief, brief)
         for filename, content in stubs.items():
-            _write_staged_file(staged_tests / filename, content.encode("utf-8"))
+            _write_staged_file(staged_tests / filename, content)
         if brief_path.exists():
             os.replace(brief_path, brief_backup)
             brief_backed_up = True
@@ -680,11 +680,11 @@ def submit_derivation(
     """Validate, publish, then expected-head append one derivation fact."""
 
     request = validate_deriver_response(facts, response.case_id, response)
-    brief = render_implementation_brief(facts, response)
+    brief = render_implementation_brief(facts, response).encode("utf-8")
     forbidden_order = _forbidden_rulings(facts, response.case_id)
     by_ruling = {item.ruling_id: item for item in response.forbidden_tests}
     stubs = {
-        by_ruling[ruling.id].filename: by_ruling[ruling.id].content
+        by_ruling[ruling.id].filename: by_ruling[ruling.id].content.encode("utf-8")
         for ruling in forbidden_order
         if by_ruling[ruling.id].content is not None
         and by_ruling[ruling.id].filename is not None
@@ -699,7 +699,14 @@ def submit_derivation(
         case_id=response.case_id,
         ledger_head=request.ledger_head,
         brief_path=brief_relative,
+        brief_sha256=hashlib.sha256(brief).hexdigest(),
         test_stub_paths=stub_relatives,
+        test_stub_sha256={
+            f"cases/{response.case_id}/derived/tests/{filename}": hashlib.sha256(
+                content
+            ).hexdigest()
+            for filename, content in stubs.items()
+        },
     )
     derived = _derived_root(repo_root, response.case_id)
     with _derivation_lock(derived):

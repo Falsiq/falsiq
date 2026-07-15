@@ -83,7 +83,9 @@ Create a private transient directory with `mktemp -d` and mode `0700`. Launch th
 five attackers as one parallel group. Give each a fresh context containing:
 
 1. the matching prompt in `${CLAUDE_PROJECT_DIR}/agents/attacker_<class>.md`;
-2. the case ID and `falsiq state --json --case "$CASE"` output;
+2. the case ID and, for boundary, consequence, prototype, and omission, the
+   `falsiq state --json --case "$CASE"` output; give the conflict attacker the
+   full global state from `falsiq state --json` so it can detect prior-case facts;
 3. only the repository evidence needed to render concrete alternatives.
 
 Require each agent to return only one strict `AttackCandidateBatch` JSON object.
@@ -160,13 +162,16 @@ derivation once all selected attacks are explicitly ruled. At most two rounds.
 The CLI does not invoke a model. First emit the request:
 
 ```console
-REQUEST=$(uv run falsiq derive --case "$CASE")
+REQUEST_PATH=$(uv run falsiq derive --case "$CASE")
 ```
 
+Read the regular request file at `$REQUEST_PATH` completely as JSON. The CLI
+prints a path; it does not print the request object itself.
+
 Launch one fresh external deriver agent with
-`${CLAUDE_PROJECT_DIR}/agents/deriver.md` and the exact JSON from `$REQUEST`.
-Treat its response as untrusted and write only the returned JSON object to a
-private temporary file. Submit it through the CLI:
+`${CLAUDE_PROJECT_DIR}/agents/deriver.md` and the exact JSON read from
+`$REQUEST_PATH`. Treat its response as untrusted and write only the returned JSON
+object to a private temporary file. Submit it through the CLI:
 
 ```console
 uv run falsiq derive --case "$CASE" --submit "$TMP/deriver-response.json"
@@ -189,7 +194,9 @@ The guard requires zero open attacks, no intent, attack, or ruling after the
 latest derivation, and a regular, non-symlinked current
 `.falsiq/cases/<case>/derived/IMPLEMENTATION_BRIEF.md`. If it fails, stop.
 Outcome facts do not alter the specification and therefore do not stale an
-otherwise current brief.
+otherwise current brief. The guard verifies the brief and every derived test
+stub against the exact SHA-256 commitments in the derivation fact and rejects
+missing, edited, symlinked, or extra stub artifacts.
 
 Read `$BRIEF` completely. Implementation may use only that derived brief as its
 requirements source. Start with its forbidden-behavior test stubs, inspect the

@@ -8,6 +8,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -217,6 +218,47 @@ def _validate_case_artifact_path(path: str, case_id: str) -> None:
         raise LedgerValidationError(f"case artifact path must be beneath cases/{case_id}/: {path}")
 
 
+def _is_canonical_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and set(value).issubset(_HEX_DIGITS)
+    )
+
+
+def _validate_derivation_commitments(fact: DerivationFact) -> None:
+    expected_brief = f"cases/{fact.case_id}/derived/IMPLEMENTATION_BRIEF.md"
+    if fact.brief_path != expected_brief:
+        raise LedgerValidationError(
+            f"derivation brief_path must equal {expected_brief}: {fact.brief_path}"
+        )
+    if not _is_canonical_sha256(fact.brief_sha256):
+        raise LedgerValidationError("derivation brief_sha256 is not canonical SHA-256")
+
+    paths = fact.test_stub_paths
+    digest_paths = set(fact.test_stub_sha256)
+    if len(paths) != len(set(paths)) or set(paths) != digest_paths:
+        raise LedgerValidationError(
+            "derivation test stub paths and digest keys must match exactly"
+        )
+    expected_prefix = f"cases/{fact.case_id}/derived/tests/"
+    for path in paths:
+        filename = path.removeprefix(expected_prefix)
+        if path == filename or not filename or "/" in filename:
+            raise LedgerValidationError(
+                "derivation test stub must be directly beneath "
+                f"{expected_prefix.removesuffix('/')}: {path}"
+            )
+        if re.fullmatch(r"test_[a-z0-9_]+\.py", filename) is None:
+            raise LedgerValidationError(
+                f"derivation test stub has an invalid filename: {path}"
+            )
+        if not _is_canonical_sha256(fact.test_stub_sha256[path]):
+            raise LedgerValidationError(
+                f"derivation test stub digest is not canonical SHA-256: {path}"
+            )
+
+
 def _require_prior(
     by_id: Mapping[str, Fact], reference: str, expected_type: type[FactBase], label: str
 ) -> FactBase:
@@ -330,9 +372,7 @@ def validate_fact_sequence(facts: Sequence[Fact]) -> None:
                 raise LedgerValidationError(
                     f"derivation ledger_head must equal current ledger head {expected}"
                 )
-            _validate_case_artifact_path(fact.brief_path, fact.case_id)
-            for path in fact.test_stub_paths:
-                _validate_case_artifact_path(path, fact.case_id)
+            _validate_derivation_commitments(fact)
 
         elif isinstance(fact, OutcomeFact) and fact.attack_id is not None:
             outcome_attack = _require_prior(by_id, fact.attack_id, AttackFact, "outcome attack")

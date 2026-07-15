@@ -29,9 +29,11 @@ from falsiq.ledger import (
     RepositoryNotFoundError,
     canonical_fact_json,
     discover_repository,
+    validate_fact_sequence,
 )
 
 TS = "2026-07-15T12:00:00.000Z"
+DIGEST = "a" * 64
 
 
 def make_id(number: int) -> str:
@@ -496,10 +498,50 @@ def test_derivation_head_must_be_the_current_global_ledger_head(tmp_path: Path) 
         case_id=first.case_id,
         ledger_head=first.id,
         brief_path=f"cases/{first.case_id}/derived/IMPLEMENTATION_BRIEF.md",
+        brief_sha256=DIGEST,
+        test_stub_sha256={},
     )
 
     with pytest.raises(LedgerValidationError, match="current ledger head"):
         ledger.append(derivation)
+
+
+@pytest.mark.parametrize(
+    "violation",
+    ["brief_path", "cross_case_stub", "invalid_stub_name", "missing_stub_digest"],
+)
+def test_derivation_commitment_invariants_are_defended_by_ledger_validation(
+    violation: str,
+) -> None:
+    intent = root_intent(1)
+    stub_path = f"cases/{intent.case_id}/derived/tests/test_x.py"
+    payload: dict[str, object] = {
+        "id": make_id(2),
+        "ts": TS,
+        "kind": "derivation",
+        "case_id": intent.case_id,
+        "ledger_head": intent.id,
+        "brief_path": f"cases/{intent.case_id}/derived/IMPLEMENTATION_BRIEF.md",
+        "brief_sha256": DIGEST,
+        "test_stub_paths": [stub_path],
+        "test_stub_sha256": {stub_path: DIGEST},
+    }
+    if violation == "brief_path":
+        payload["brief_path"] = "cases/another-case/derived/IMPLEMENTATION_BRIEF.md"
+    elif violation == "cross_case_stub":
+        other = "cases/another-case/derived/tests/test_x.py"
+        payload["test_stub_paths"] = [other]
+        payload["test_stub_sha256"] = {other: DIGEST}
+    elif violation == "invalid_stub_name":
+        invalid = f"cases/{intent.case_id}/derived/tests/helper.py"
+        payload["test_stub_paths"] = [invalid]
+        payload["test_stub_sha256"] = {invalid: DIGEST}
+    else:
+        payload["test_stub_sha256"] = {}
+    derivation = DerivationFact.model_construct(**payload)
+
+    with pytest.raises(LedgerValidationError, match="derivation"):
+        validate_fact_sequence([intent, derivation])
 
 
 def test_durable_artifact_paths_stay_beneath_their_case(tmp_path: Path) -> None:
@@ -630,6 +672,8 @@ def test_round_trip_500_seeded_mixed_facts(tmp_path: Path) -> None:
             case_id=intent.case_id,
             ledger_head=outcome.id,
             brief_path=f"cases/{intent.case_id}/derived/IMPLEMENTATION_BRIEF.md",
+            brief_sha256=DIGEST,
+            test_stub_sha256={},
         )
         next_id += 1
         facts.extend([intent, probe, ruling, outcome, derivation])

@@ -7,7 +7,12 @@ import sys
 from pathlib import Path
 
 from falsiq.attacks import AttackCandidate, AttackCandidateBatch, build_selection_envelope
-from falsiq.derive import DeriverResponse, build_derivation_request, submit_derivation
+from falsiq.derive import (
+    DeriverResponse,
+    ForbiddenTest,
+    build_derivation_request,
+    submit_derivation,
+)
 from falsiq.facts import (
     Artifact,
     AttackFact,
@@ -209,7 +214,7 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
         ts="2026-07-15T12:00:00.000Z",
         case_id=case_id,
         attack_id=probe.id,
-        verdict="intended",
+        verdict="forbidden",
     )
     ledger.append_batch([intent, probe, ruling])
     facts = ledger.read()
@@ -218,6 +223,13 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
         request_id=request.request_id,
         case_id=case_id,
         ledger_head=request.ledger_head,
+        forbidden_tests=[
+            ForbiddenTest(
+                ruling_id=ruling.id,
+                filename="test_no_unbounded_retry.py",
+                content="def test_no_unbounded_retry() -> None:\n    assert True\n",
+            )
+        ],
     )
     submit_derivation(
         repo,
@@ -233,17 +245,57 @@ def test_guard_allows_only_the_current_safe_derived_brief(tmp_path: Path) -> Non
     assert allowed.stdout.strip() == (f".falsiq/cases/{case_id}/derived/IMPLEMENTATION_BRIEF.md")
 
     brief = repo / allowed.stdout.strip()
-    original = brief.read_text(encoding="utf-8")
+    original = brief.read_bytes()
+    brief.write_bytes(original + b"tampered\n")
+    tampered_brief = run_script(GUARD, "--case", case_id, cwd=repo)
+    assert tampered_brief.returncode == 2
+    assert "digest mismatch" in tampered_brief.stderr
+
+    brief.write_bytes(original)
     brief.unlink()
+    missing_brief = run_script(GUARD, "--case", case_id, cwd=repo)
+    assert missing_brief.returncode == 2
+    assert "derived brief is unavailable" in missing_brief.stderr
+
     outside = repo / "outside.md"
-    outside.write_text(original, encoding="utf-8")
+    outside.write_bytes(original)
     brief.symlink_to(os.path.relpath(outside, brief.parent))
     unsafe = run_script(GUARD, "--case", case_id, cwd=repo)
     assert unsafe.returncode == 2
     assert "symlink" in unsafe.stderr
 
     brief.unlink()
-    brief.write_text(original, encoding="utf-8")
+    brief.write_bytes(original)
+    tests_dir = brief.parent / "tests"
+    stub = tests_dir / "test_no_unbounded_retry.py"
+    stub_original = stub.read_bytes()
+    stub.write_bytes(stub_original + b"# edited\n")
+    tampered_stub = run_script(GUARD, "--case", case_id, cwd=repo)
+    assert tampered_stub.returncode == 2
+    assert "digest mismatch" in tampered_stub.stderr
+
+    stub.write_bytes(stub_original)
+    stub.unlink()
+    missing_stub = run_script(GUARD, "--case", case_id, cwd=repo)
+    assert missing_stub.returncode == 2
+    assert "missing derived test stubs" in missing_stub.stderr
+
+    outside_stub = repo / "outside_stub.py"
+    outside_stub.write_bytes(stub_original)
+    stub.symlink_to(os.path.relpath(outside_stub, stub.parent))
+    symlinked_stub = run_script(GUARD, "--case", case_id, cwd=repo)
+    assert symlinked_stub.returncode == 2
+    assert "symlink" in symlinked_stub.stderr
+
+    stub.unlink()
+    stub.write_bytes(stub_original)
+    extra = tests_dir / "test_uncommitted.py"
+    extra.write_text("def test_extra() -> None:\n    pass\n", encoding="utf-8")
+    extra_stub = run_script(GUARD, "--case", case_id, cwd=repo)
+    assert extra_stub.returncode == 2
+    assert "unexpected derived test stubs" in extra_stub.stderr
+    extra.unlink()
+
     ledger.append(
         OutcomeFact(
             id=make_id(4),
@@ -287,6 +339,8 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
         "exactly five fresh attackers in parallel",
         "At most two rounds",
         "IMPLEMENTATION_BRIEF.md",
+        "Read the regular request file",
+        "full global state",
     )
     assert all(phrase in skill for phrase in required_skill_phrases)
 
@@ -298,6 +352,7 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
         "[user supplies explicit rulings]",
         "$ falsiq rule",
         "$ falsiq derive --case",
+        "$ cat <request.json>",
         "$ falsiq derive --case <CASE> --submit",
         "$ python <skill>/scripts/guard_open_attacks.py",
         "[implementation begins from IMPLEMENTATION_BRIEF.md]",

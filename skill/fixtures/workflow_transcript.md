@@ -24,6 +24,8 @@ $ falsiq rule <ATTACK> forbidden
 [state confirms zero open attacks and the round-two gate does not pass]
 $ falsiq derive --case <CASE>
 <request.json>
+$ cat <request.json>
+{"case_id":"<CASE>","request_id":"<digest>",...}
 [a fresh external deriver returns strict response JSON]
 $ falsiq derive --case <CASE> --submit <response.json>
 <brief path>

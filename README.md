@@ -165,6 +165,12 @@ active ruling also carries its ledger-owned artifact, forced-choice meanings,
 settled decisions, and hate scenario into the brief, so a choice such as `A` or
 `B` remains implementable without reopening the collision file.
 
+Each derivation fact commits the SHA-256 digest of the exact brief bytes and an
+exact path-to-digest mapping for its pytest stubs. The skill guard refuses an
+implementation handoff if a committed artifact is missing, edited, symlinked,
+or accompanied by an uncommitted test stub; regenerate through `derive` instead
+of editing derived output.
+
 Submissions for the same case serialize publication and expected-head ledger
 admission through an owner-private sidecar lock. A stale concurrent response
 therefore restores the last committed brief rather than overwriting it during

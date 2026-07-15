@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import stat
 import subprocess
@@ -508,9 +509,15 @@ def test_derive_submit_materializes_brief_stubs_and_derivation_fact(
     assert isinstance(derivation, DerivationFact)
     assert derivation.ledger_head == request.ledger_head
     assert derivation.brief_path == f"cases/{intent.case_id}/derived/IMPLEMENTATION_BRIEF.md"
+    assert derivation.brief_sha256 == hashlib.sha256(brief_path.read_bytes()).hexdigest()
     assert derivation.test_stub_paths == [
         f"cases/{intent.case_id}/derived/tests/test_forbidden_retry_on_4xx.py"
     ]
+    assert derivation.test_stub_sha256 == {
+        f"cases/{intent.case_id}/derived/tests/test_forbidden_retry_on_4xx.py": hashlib.sha256(
+            stub_path.read_bytes()
+        ).hexdigest()
+    }
     assert stat.S_IMODE((brief_path.parent / ".derive.lock").stat().st_mode) == 0o600
 
 
@@ -536,6 +543,7 @@ def test_unexpressible_forbidden_ruling_is_rendered_without_a_stub(
     fact = ledger.read()[-1]
     assert isinstance(fact, DerivationFact)
     assert fact.test_stub_paths == []
+    assert fact.test_stub_sha256 == {}
 
 
 @pytest.mark.parametrize("mismatch", ["request_id", "case_id", "ledger_head"])
