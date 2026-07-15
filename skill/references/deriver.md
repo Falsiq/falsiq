@@ -5,12 +5,11 @@ current case state, immutable ledger head, prompt hash, and exact response schem
 Return only one strict `DeriverResponse` JSON value; never call the Falsiq CLI.
 
 Do not rewrite, summarize, or replace intent or ruling text. The plumbing renders
-those sections verbatim from the ledger. You may supply only:
-
-- bounded `agent_discretion` entries for decisions explicitly left to the builder;
-- exactly one `forbidden_tests` entry for every active forbidden ruling, containing
+those sections verbatim from the ledger. Agent discretion is also rendered
+deterministically from active `dont_care` rulings. You may supply only exactly one
+`forbidden_tests` entry for every active forbidden ruling, containing
   either a safely named pytest stub or a concrete reason it cannot be expressed as
-  a repository-level test.
+  a repository-level test. Do not return an `agent_discretion` field.
 
 Copy `request_id`, `case_id`, and `ledger_head` exactly. Use filenames matching
 `test_[a-z0-9_]+.py`, provide no paths, and add no fields outside the response

@@ -113,11 +113,13 @@ platform no-op.
 
 `derive` writes a canonical request below the observed ledger head. Its request
 ID hashes the case state, bundled deriver prompt, and response schema. The strict
-response can add only bounded agent-discretion entries and one safe test stub or
-unexpressible reason per active forbidden ruling; intent and ruling sections are
-always rendered from ledger facts. A ruling is not meaningful without its
-collision, so the brief includes the source attack's concrete artifact, option
-bodies, settled decisions, and hate scenario alongside the verdict and choice.
+response can add only one safe test stub or unexpressible reason per active
+forbidden ruling; intent, ruling, and agent discretion sections are always
+rendered from ledger facts. Every settled decision on an active `dont_care`
+ruling is listed with ruling and attack provenance, and the external deriver
+cannot add or omit discretion. A ruling is not meaningful without its collision,
+so the brief includes the source attack's concrete artifact, option bodies,
+settled decisions, and hate scenario alongside the verdict and choice.
 
 The current brief and test directory are disposable stable paths beneath the
 case. They are staged and published before an expected-head derivation append;

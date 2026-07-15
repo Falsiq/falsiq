@@ -45,12 +45,11 @@ current case state, immutable ledger head, prompt hash, and exact response schem
 Return only one strict `DeriverResponse` JSON value; never call the Falsiq CLI.
 
 Do not rewrite, summarize, or replace intent or ruling text. The plumbing renders
-those sections verbatim from the ledger. You may supply only:
-
-- bounded `agent_discretion` entries for decisions explicitly left to the builder;
-- exactly one `forbidden_tests` entry for every active forbidden ruling, containing
+those sections verbatim from the ledger. Agent discretion is also rendered
+deterministically from active `dont_care` rulings. You may supply only exactly one
+`forbidden_tests` entry for every active forbidden ruling, containing
   either a safely named pytest stub or a concrete reason it cannot be expressed as
-  a repository-level test.
+  a repository-level test. Do not return an `agent_discretion` field.
 
 Copy `request_id`, `case_id`, and `ledger_head` exactly. Use filenames matching
 `test_[a-z0-9_]+.py`, provide no paths, and add no fields outside the response
@@ -187,21 +186,6 @@ def _validate_inert_pytest_scaffold(tree: ast.Module) -> None:
         names.add(statement.name)
 
 
-class AgentDiscretion(StrictDerivationModel):
-    decision: str = Field(max_length=500)
-    rationale: str = Field(max_length=1_000)
-
-    @field_validator("decision")
-    @classmethod
-    def decision_is_bounded(cls, value: str) -> str:
-        return _require_bounded_text(value, name="discretion decision", maximum=500)
-
-    @field_validator("rationale")
-    @classmethod
-    def rationale_is_bounded(cls, value: str) -> str:
-        return _require_bounded_text(value, name="discretion rationale", maximum=1_000)
-
-
 class ForbiddenTest(StrictDerivationModel):
     ruling_id: Ulid
     filename: TestFilename | None = None
@@ -263,7 +247,6 @@ class DeriverResponse(StrictDerivationModel):
     request_id: Digest
     case_id: Ulid
     ledger_head: Ulid
-    agent_discretion: list[AgentDiscretion] = Field(default_factory=list, max_length=20)
     forbidden_tests: list[ForbiddenTest] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
@@ -278,9 +261,6 @@ class DeriverResponse(StrictDerivationModel):
             raise ValueError(
                 "forbidden test filenames must not contain case-insensitive duplicates"
             )
-        discretion = [(item.decision, item.rationale) for item in self.agent_discretion]
-        if len(discretion) != len(set(discretion)):
-            raise ValueError("agent discretion entries must not contain duplicates")
         return self
 
 
@@ -549,18 +529,19 @@ def render_implementation_brief(
                 lines.append(f"{prefix} — not expressible: {reason}")
         lines.append("")
 
+    discretion_rulings = [ruling for ruling in ordered_rulings if ruling.verdict == "dont_care"]
     lines.extend(["## Agent discretion", ""])
-    if not response.agent_discretion:
+    if not discretion_rulings:
         lines.extend(["- None recorded.", ""])
     else:
-        ordered_discretion = sorted(
-            response.agent_discretion,
-            key=lambda item: (item.decision, item.rationale),
-        )
-        for item in ordered_discretion:
-            decision = _escape_markdown_inline(item.decision)
-            rationale = _escape_markdown_inline(item.rationale)
-            lines.append(f"- **{decision}** — {rationale}")
+        for ruling in discretion_rulings:
+            source_attack = attacks[ruling.attack_id]
+            for settled in source_attack.settles:
+                decision = _escape_markdown_inline(settled)
+                lines.append(
+                    f"- **{decision}** — explicitly licensed by active `dont_care` ruling "
+                    f"`{ruling.id}` for attack `{source_attack.id}`."
+                )
         lines.append("")
     return "\n".join(lines)
 
@@ -802,7 +783,6 @@ def submit_derivation(
 
 __all__ = [
     "DERIVER_PROMPT",
-    "AgentDiscretion",
     "DerivationError",
     "DerivationRequest",
     "DeriverResponse",

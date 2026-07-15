@@ -197,10 +197,12 @@ path to
 `.falsiq/cases/<case>/derived/IMPLEMENTATION_BRIEF.md`, replaces the derived
 pytest-stub set, and appends one derivation fact. Intent and amendment text in the
 brief always comes verbatim from the ledger; response-authored text is confined
-to the clearly labeled Agent discretion and test-expressibility sections. Each
-active ruling also carries its ledger-owned artifact, forced-choice meanings,
-settled decisions, and hate scenario into the brief, so a choice such as `A` or
-`B` remains implementable without reopening the collision file.
+to the clearly labeled test-expressibility section. Agent discretion is derived
+only from the settled decisions of active `dont_care` rulings, with ruling and
+attack provenance; the external deriver cannot add or omit it. Each active
+ruling also carries its ledger-owned artifact, forced-choice meanings, settled
+decisions, and hate scenario into the brief, so a choice such as `A` or `B`
+remains implementable without reopening the collision file.
 
 Each derivation fact commits the SHA-256 digest of the exact brief bytes and an
 exact path-to-digest mapping for its pytest stubs. The skill guard refuses an

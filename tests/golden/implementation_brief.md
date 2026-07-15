@@ -2,7 +2,7 @@
 
 - Case: `00000000010000000000000001`
 - Ledger head: `00000000050000000000000005`
-- Request: `546b759231df0fd50a54e2db0bb1fa31a726f0ccbb1481d39a4e4e9f4326b68a`
+- Request: `360f644d5223a5770d77bed371465792430d922af404f7ab088c804f10859319`
 
 ## Intent (verbatim)
 
@@ -71,4 +71,4 @@ Bad outcome 4
 
 ## Agent discretion
 
-- **Choose the exact retry log wording&#46;** — The principal explicitly ruled this don&#x27;t&#45;care&#46;
+- **retry log wording** — explicitly licensed by active `dont_care` ruling `00000000050000000000000005` for attack `00000000040000000000000004`.

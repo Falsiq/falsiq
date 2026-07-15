@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from falsiq.cli import main
 from falsiq.derive import (
     DERIVER_PROMPT,
-    AgentDiscretion,
     DerivationError,
     DerivationRequest,
     DeriverResponse,
@@ -126,12 +125,6 @@ def response_for(
         request_id=request.request_id,
         case_id=request.case_id,
         ledger_head=request.ledger_head,
-        agent_discretion=[
-            AgentDiscretion(
-                decision="Choose the exact retry log wording.",
-                rationale="The principal explicitly ruled this don't-care.",
-            )
-        ],
         forbidden_tests=[test],
     )
 
@@ -369,11 +362,23 @@ def test_deriver_response_rejects_extra_intent_or_duplicate_outputs() -> None:
         "request_id": "a" * 64,
         "case_id": make_id(1),
         "ledger_head": make_id(5),
-        "agent_discretion": [],
         "forbidden_tests": [],
     }
     with pytest.raises(ValidationError, match="Extra inputs"):
         DeriverResponse.model_validate(base | {"intent": "agent rewrite"})
+
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        DeriverResponse.model_validate(
+            base
+            | {
+                "agent_discretion": [
+                    {
+                        "decision": "Silently add a new requirement.",
+                        "rationale": "The deriver chose it.",
+                    }
+                ]
+            }
+        )
 
     duplicate = ForbiddenTest(
         ruling_id=make_id(3),
@@ -411,7 +416,6 @@ def test_brief_rendering_is_order_stable_and_intent_section_is_ledger_only(
     first = render_implementation_brief(facts, response)
     reordered = response.model_copy(
         update={
-            "agent_discretion": list(reversed(response.agent_discretion)),
             "forbidden_tests": list(reversed(response.forbidden_tests)),
         }
     )
@@ -422,6 +426,21 @@ def test_brief_rendering_is_order_stable_and_intent_section_is_ledger_only(
     assert intent.text in intent_section
     assert "agent rewrite" not in intent_section
     assert first == (Path(__file__).parent / "golden" / "implementation_brief.md").read_text()
+
+
+def test_brief_derives_dont_care_discretion_from_ledger(tmp_path: Path) -> None:
+    ledger, intent, forbidden, dont_care = ruled_ledger(git_repo(tmp_path / "repo"))
+    facts = ledger.read()
+    request = build_derivation_request(facts, intent.case_id)
+    response = response_for(request, forbidden, reason="Not expressible")
+
+    brief = render_implementation_brief(facts, response)
+    discretion = brief.split("## Agent discretion", maxsplit=1)[1]
+
+    assert "retry log wording" in discretion
+    assert dont_care.id in discretion
+    assert dont_care.attack_id in discretion
+    assert "None recorded" not in discretion
 
 
 def test_brief_preserves_the_ledger_meaning_of_each_ruling_choice(tmp_path: Path) -> None:
@@ -522,7 +541,7 @@ def test_deriver_prompt_file_matches_the_hashed_runtime_contract() -> None:
     assert prompt_path.read_text(encoding="utf-8") == DERIVER_PROMPT
     assert skill_prompt_path.read_text(encoding="utf-8") == DERIVER_PROMPT
     assert deriver_prompt_hash() == (
-        "fbae59e3d6ad5fb37157ac391bd5a3ec8e479c91d48266d72e2b7242a460e46c"
+        "9297e30e738f4e76904ebeb6cdefe733066419500a27a9e42c1ced93309da6ea"
     )
 
 
@@ -952,10 +971,9 @@ def test_concurrent_submissions_cannot_roll_back_a_committed_brief(tmp_path: Pat
     responses = {
         label: base.model_copy(
             update={
-                "agent_discretion": [
-                    AgentDiscretion(
-                        decision=f"Use committed response {label}.",
-                        rationale="Identifies the winning concurrent submission.",
+                "forbidden_tests": [
+                    base.forbidden_tests[0].model_copy(
+                        update={"unexpressible_reason": f"Not expressible response {label}."}
                     )
                 ]
             }
@@ -998,7 +1016,7 @@ def test_concurrent_submissions_cannot_roll_back_a_committed_brief(tmp_path: Pat
     committed = [label for label, success in results if success]
     assert len(committed) == 1
     brief = (derived / "IMPLEMENTATION_BRIEF.md").read_text(encoding="utf-8")
-    assert f"Use committed response {committed[0]}" in brief
+    assert f"Not expressible response {committed[0]}" in brief
     assert "old brief" not in brief
 
 

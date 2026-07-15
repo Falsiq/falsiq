@@ -590,7 +590,6 @@ def test_installed_console_workflow_is_portable_to_a_repo_without_project_files(
                 "request_id": request["request_id"],
                 "case_id": request["case_id"],
                 "ledger_head": request["ledger_head"],
-                "agent_discretion": [],
                 "forbidden_tests": [],
             }
         ),
