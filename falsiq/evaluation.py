@@ -47,6 +47,7 @@ from .agent_runtime import (
     replay_response,
 )
 from .benchmark import EvalTask, PrincipalRuling, PublicTask, detect_principal_leaks, load_task
+from .constraints import validate_consequence_artifact
 from .score import (
     AttackEvaluation,
     BootstrapInterval,
@@ -145,6 +146,11 @@ class AttackCandidate(ContractModel):
 
     @model_validator(mode="after")
     def decision_lists_are_sets(self) -> AttackCandidate:
+        validate_consequence_artifact(
+            klass=self.klass,
+            artifact_type=self.artifact.type,
+            body=self.artifact.body,
+        )
         if len(self.settles) != len(set(self.settles)):
             raise ValueError("settles entries must be unique")
         if len(self.silent_settles) != len(set(self.silent_settles)):
@@ -269,9 +275,7 @@ def _safe_relative_file(value: str) -> str:
     if parts[0].casefold() in {".git", ".falsiq"}:
         raise ValueError("builder cannot modify repository or Falsiq control data")
     if any(
-        ":" in part
-        or part.endswith((" ", "."))
-        or _WINDOWS_DEVICE_NAME.fullmatch(part) is not None
+        ":" in part or part.endswith((" ", ".")) or _WINDOWS_DEVICE_NAME.fullmatch(part) is not None
         for part in parts
     ):
         raise ValueError("changed path is ambiguous or reserved on Windows")
@@ -571,9 +575,7 @@ class AgentRuntime:
         except EvaluationProtocolError:
             raise
         except (AgentRuntimeError, OSError) as error:
-            raise EvaluationRuntimeError(
-                f"unable to replay {role} request {request_id}"
-            ) from error
+            raise EvaluationRuntimeError(f"unable to replay {role} request {request_id}") from error
 
 
 class ConditionMetrics(ContractModel):
@@ -789,9 +791,7 @@ def _select_attacks(
             highest,
             key=lambda values: tuple(sorted(digests[item.attack_id] for item in values)),
         )
-        expected = tuple(
-            sorted(chosen, key=lambda item: (-score(item), digests[item.attack_id]))
-        )
+        expected = tuple(sorted(chosen, key=lambda item: (-score(item), digests[item.attack_id])))
     expected_ids = [candidate.attack_id for candidate in expected]
     if selection.selected_attack_ids != expected_ids:
         raise EvaluationProtocolError(
@@ -885,9 +885,7 @@ def _render_falsiq_handoff(
                 interaction.artifact.body,
             ]
         )
-        lines.extend(
-            f"- {option.key}: {option.body}" for option in interaction.artifact.options
-        )
+        lines.extend(f"- {option.key}: {option.body}" for option in interaction.artifact.options)
         ruling = interaction.ruling
         rendered = f"- Ruling: {ruling.verdict}"
         if ruling.choice is not None:
@@ -953,9 +951,7 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
             expected_class = role.removeprefix("attacker.")
             for attack in response.attacks:
                 if attack.klass != expected_class:
-                    raise EvaluationProtocolError(
-                        f"{role} returned attack class {attack.klass}"
-                    )
+                    raise EvaluationProtocolError(f"{role} returned attack class {attack.klass}")
                 if attack.attack_id in seen_attack_ids:
                     raise EvaluationProtocolError("attack IDs must be unique across rounds")
                 seen_attack_ids.add(attack.attack_id)
@@ -1003,9 +999,7 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
             )
             leaks = detect_principal_leaks(task, ruling)
             if leaks:
-                raise EvaluationLeakageError(
-                    f"principal leaked hidden requirement {leaks[0]}"
-                )
+                raise EvaluationLeakageError(f"principal leaked hidden requirement {leaks[0]}")
             option_keys = {option.key for option in attack.artifact.options}
             if ruling.choice is not None and ruling.choice not in option_keys:
                 raise EvaluationProtocolError("principal chose an option absent from the attack")
@@ -1158,9 +1152,7 @@ def _condition_metrics(
         licensed_discretion_rate=licensed_discretion_rate(outcome.evaluations),
         interaction_cost=interaction_cost(outcome.evaluations),
         all_intended_round_rate=(
-            _all_intended_round_rate(outcome.evaluations)
-            if condition == "falsiq"
-            else None
+            _all_intended_round_rate(outcome.evaluations) if condition == "falsiq" else None
         ),
     )
 
@@ -1215,14 +1207,10 @@ def _aggregate_condition(
             elicited_weight += sum(weights[requirement_id] for requirement_id in elicited)
         return None if total_weight == 0 else elicited_weight / total_weight
 
-    evaluations = tuple(
-        evaluation for _, result in pairs for evaluation in result.evaluations
-    )
+    evaluations = tuple(evaluation for _, result in pairs for evaluation in result.evaluations)
     costs = [interaction_cost(result.evaluations) for _, result in pairs]
     control_costs = [
-        interaction_cost(result.evaluations)
-        for task, result in pairs
-        if task.stratum == "control"
+        interaction_cost(result.evaluations) for task, result in pairs if task.stratum == "control"
     ]
     return AggregateConditionMetrics(
         recall_at_round_1=aggregate_recall(1),
@@ -1237,10 +1225,7 @@ def _aggregate_condition(
                     for _, result in pairs
                     for flag in _all_intended_round_flags(result.evaluations)
                 )
-                / sum(
-                    len(_all_intended_round_flags(result.evaluations))
-                    for _, result in pairs
-                )
+                / sum(len(_all_intended_round_flags(result.evaluations)) for _, result in pairs)
             )
             if condition == "falsiq" and any(result.evaluations for _, result in pairs)
             else (0.0 if condition == "falsiq" else None)
@@ -1550,9 +1535,7 @@ def _judge_all_conditions(
                 JudgeResponse,
             )
             expected_ids = {requirement.id for requirement in build.task.latent_requirements}
-            observed_ids = {
-                assessment.requirement_id for assessment in response.requirement_scores
-            }
+            observed_ids = {assessment.requirement_id for assessment in response.requirement_scores}
             if observed_ids != expected_ids:
                 raise EvaluationProtocolError(
                     "judge must score every latent requirement exactly once"
@@ -1712,12 +1695,8 @@ def _render_csv(report: EvaluationReport) -> str:
                     task.falsiq.all_intended_round_rate
                 ),
                 "falsiq_interaction_cost": task.falsiq.interaction_cost,
-                "baseline_recall_at_round_1": _format_number(
-                    task.baseline.recall_at_round_1
-                ),
-                "baseline_recall_at_round_2": _format_number(
-                    task.baseline.recall_at_round_2
-                ),
+                "baseline_recall_at_round_1": _format_number(task.baseline.recall_at_round_1),
+                "baseline_recall_at_round_2": _format_number(task.baseline.recall_at_round_2),
                 "baseline_waste_rate": _format_number(task.baseline.waste_rate),
                 "baseline_licensed_discretion_rate": _format_number(
                     task.baseline.licensed_discretion_rate

@@ -53,7 +53,11 @@ def candidate(
     return AttackCandidate(
         klass=klass,
         targets=[INTENT_ID],
-        artifact=artifact or Artifact(type="input", body=f"concrete {name} input"),
+        artifact=artifact
+        or Artifact(
+            type="scenario" if klass == "consequence" else "input",
+            body=f"concrete {name} input",
+        ),
         settles=decisions,
         silent_settles=decisions[:silent],
         hate_scenario=f"The {name} behavior silently loses user work.",
@@ -74,7 +78,11 @@ def attack_fact(
         case_id=CASE_ID,
         klass=klass,
         targets=[INTENT_ID],
-        artifact=artifact or Artifact(type="input", body=f"input {index}"),
+        artifact=artifact
+        or Artifact(
+            type="scenario" if klass == "consequence" else "input",
+            body=f"input {index}",
+        ),
         settles=[f"decision {index}"],
         silent_settles=[],
         hate_scenario=f"bad outcome {index}",
@@ -129,6 +137,19 @@ def test_candidate_batches_are_strict_class_scoped_agent_output() -> None:
 
 
 @pytest.mark.parametrize(
+    "artifact",
+    [
+        Artifact(type="scenario", body="word " * 151),
+        Artifact(type="input", body="short but not a narrative"),
+        Artifact(type="scenario", path="cases/example/scenario.md"),
+    ],
+)
+def test_consequence_candidates_enforce_the_narrative_budget(artifact: Artifact) -> None:
+    with pytest.raises(ValidationError, match="consequence"):
+        candidate("downstream", klass="consequence", artifact=artifact)
+
+
+@pytest.mark.parametrize(
     "updates",
     [
         {"settles": []},
@@ -172,9 +193,7 @@ def test_render_costs_use_fixed_policy_units(cost: str, expected: Fraction) -> N
 
 
 def test_candidate_digest_is_canonical_content_identity() -> None:
-    payload = candidate("digest", settles=2, silent=1, cost="expensive").model_dump(
-        mode="json"
-    )
+    payload = candidate("digest", settles=2, silent=1, cost="expensive").model_dump(mode="json")
     reordered = json.loads(json.dumps(payload, sort_keys=False))
 
     assert candidate_digest(AttackCandidate.model_validate(reordered)) == (
@@ -212,9 +231,7 @@ def test_selection_enforces_prototype_and_omission_caps() -> None:
     proto_one = candidate("p1", klass="prototype", settles=10)
     proto_two = candidate("p2", klass="prototype", settles=9)
     boundary = candidate("b", settles=1)
-    prototype_envelope = build_selection_envelope(
-        CASE_ID, 1, [proto_one, proto_two, boundary]
-    )
+    prototype_envelope = build_selection_envelope(CASE_ID, 1, [proto_one, proto_two, boundary])
 
     assert [record.candidate.klass for record in prototype_envelope.selected_records].count(
         "prototype"
@@ -458,9 +475,7 @@ def test_collision_markdown_is_stable_safe_and_matches_golden() -> None:
 
 def test_multi_target_collision_names_amendment_targets_and_requires_selection() -> None:
     second_target = "01ARZ3NDEKTSV4RRFFQ69G5FC0"
-    probe = attack_fact(0).model_copy(
-        update={"targets": [INTENT_ID, second_target]}
-    )
+    probe = attack_fact(0).model_copy(update={"targets": [INTENT_ID, second_target]})
 
     rendered = render_collision_markdown(CASE_ID, [probe])
 
@@ -468,8 +483,7 @@ def test_multi_target_collision_names_amendment_targets_and_requires_selection()
     assert f"<code>{INTENT_ID}</code>" in rendered
     assert f"<code>{second_target}</code>" in rendered
     assert (
-        f'falsiq rule {probe.id} amend --text "<replacement intent>" '
-        "--intent <active-target-id>"
+        f'falsiq rule {probe.id} amend --text "<replacement intent>" --intent <active-target-id>'
     ) in rendered
 
 
@@ -508,9 +522,7 @@ def test_collision_renderer_rejects_empty_mixed_or_duplicate_batches() -> None:
             [attacks[0].model_copy(update={"case_id": "01ARZ3NDEKTSV4RRFFQ69G5FC0"})],
         )
     with pytest.raises(ValueError, match="one round"):
-        render_collision_markdown(
-            CASE_ID, [attacks[0], attacks[1].model_copy(update={"round": 2})]
-        )
+        render_collision_markdown(CASE_ID, [attacks[0], attacks[1].model_copy(update={"round": 2})])
     with pytest.raises(ValueError, match="duplicate"):
         render_collision_markdown(CASE_ID, [attacks[0], attacks[0]])
 

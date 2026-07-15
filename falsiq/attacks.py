@@ -28,6 +28,7 @@ from pydantic import (
     model_validator,
 )
 
+from .constraints import validate_consequence_artifact
 from .facts import (
     SCHEMA_VERSION,
     Artifact,
@@ -97,6 +98,11 @@ class AttackCandidate(StrictTransientModel):
 
     @model_validator(mode="after")
     def silent_decisions_are_also_settled(self) -> AttackCandidate:
+        validate_consequence_artifact(
+            klass=self.klass,
+            artifact_type=self.artifact.type,
+            body=self.artifact.body,
+        )
         if set(self.silent_settles).difference(self.settles):
             raise ValueError("silent_settles must be a subset of settles")
         return self
@@ -106,9 +112,7 @@ def _candidate_artifact_paths(candidate: AttackCandidate) -> tuple[str, ...]:
     paths: list[str] = []
     if candidate.artifact.path is not None:
         paths.append(candidate.artifact.path)
-    paths.extend(
-        option.path for option in candidate.artifact.options if option.path is not None
-    )
+    paths.extend(option.path for option in candidate.artifact.options if option.path is not None)
     return tuple(paths)
 
 
@@ -206,9 +210,7 @@ def _select_records(records: Sequence[CandidateRecord]) -> list[CandidateRecord]
         best = [
             selection
             for selection in valid
-            if sum(
-                (candidate_score(record.candidate) for record in selection), Fraction()
-            )
+            if sum((candidate_score(record.candidate) for record in selection), Fraction())
             == best_score
         ]
         chosen = min(
@@ -323,9 +325,7 @@ def validate_round_gate(
         ruling = active_rulings[attack.id]
         if ruling.attack_id != attack.id or ruling.case_id != attack.case_id:
             raise RoundGateError("active ruling does not match its round 1 attack")
-    if not any(
-        active_rulings[attack.id].verdict in {"amend", "forbidden"} for attack in round_one
-    ):
+    if not any(active_rulings[attack.id].verdict in {"amend", "forbidden"} for attack in round_one):
         raise RoundGateError("round 2 requires an amend or forbidden round 1 ruling")
 
 

@@ -142,3 +142,11 @@ point. Handled errors roll back both trees. A crash may therefore leave private
 state alone, but never a public release that was committed before its private
 counterpart. Existing outputs, symlinks, path aliases, and overlapping roots are
 rejected instead of merged or overwritten.
+
+## D014: Consequences are bounded by every attack contract
+
+A consequence is useful only as a cheap day-30 narrative. Durable attack facts,
+disposable production candidates, and evaluation candidates therefore share the
+same executable rule: the artifact is an inline `scenario` body of at most 150
+whitespace-delimited words. Path-only or differently typed artifacts are
+rejected before selection or append rather than relying on prompt compliance.

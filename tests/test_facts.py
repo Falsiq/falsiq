@@ -217,6 +217,43 @@ def test_attack_preserves_scoring_inputs() -> None:
     assert fact.round == 1
 
 
+def test_consequence_attack_accepts_a_150_word_scenario() -> None:
+    fact = AttackFact(
+        **base_fields(),
+        klass="consequence",
+        targets=[INTENT_ID],
+        artifact=Artifact(type="scenario", body="word " * 150),
+        settles=["operational consequence"],
+        hate_scenario="Month-later maintenance becomes unsafe.",
+        render_cost="trivial",
+        round=1,
+    )
+
+    assert len(fact.artifact.body.split()) == 150  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        Artifact(type="scenario", body="word " * 151),
+        Artifact(type="transcript", body="A short narrative"),
+        Artifact(type="scenario", path="cases/example/scenario.md"),
+    ],
+)
+def test_consequence_attack_rejects_non_narrative_artifacts(artifact: Artifact) -> None:
+    with pytest.raises(ValidationError, match="consequence"):
+        AttackFact(
+            **base_fields(),
+            klass="consequence",
+            targets=[INTENT_ID],
+            artifact=artifact,
+            settles=["operational consequence"],
+            hate_scenario="Month-later maintenance becomes unsafe.",
+            render_cost="trivial",
+            round=1,
+        )
+
+
 @pytest.mark.parametrize(
     "updates",
     [
@@ -389,15 +426,9 @@ def test_fact_union_round_trips_all_kinds_and_forbids_unknown_fields() -> None:
             render_cost="trivial",
             round=1,
         ),
-        RulingFact(
-            **base_fields(), attack_id=ATTACK_ID, verdict="dont_care", supersedes=RULING_ID
-        ),
-        DerivationFact(
-            **base_fields(), ledger_head=RULING_ID, brief_path="derived/brief.md"
-        ),
-        OutcomeFact(
-            **base_fields(), otype="accepted", trace="n/a", notes="No rework needed."
-        ),
+        RulingFact(**base_fields(), attack_id=ATTACK_ID, verdict="dont_care", supersedes=RULING_ID),
+        DerivationFact(**base_fields(), ledger_head=RULING_ID, brief_path="derived/brief.md"),
+        OutcomeFact(**base_fields(), otype="accepted", trace="n/a", notes="No rework needed."),
     ]
 
     for fact in facts:

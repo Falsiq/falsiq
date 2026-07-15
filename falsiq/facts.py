@@ -21,14 +21,14 @@ from pydantic import (
     model_validator,
 )
 
+from .constraints import validate_consequence_artifact
+
 SCHEMA_VERSION = 1
 
 _CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _CROCKFORD_VALUES = {character: index for index, character in enumerate(_CROCKFORD_ALPHABET)}
 _ULID_PATTERN = re.compile(r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
-_TIMESTAMP_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(?:\d{3})?Z$"
-)
+_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(?:\d{3})?Z$")
 
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")]
 OptionKey = Annotated[
@@ -247,6 +247,11 @@ class AttackFact(FactBase):
 
     @model_validator(mode="after")
     def silent_decisions_are_settled(self) -> AttackFact:
+        validate_consequence_artifact(
+            klass=self.klass,
+            artifact_type=self.artifact.type,
+            body=self.artifact.body,
+        )
         missing = set(self.silent_settles).difference(self.settles)
         if missing:
             raise ValueError("silent_settles must be a subset of settles")

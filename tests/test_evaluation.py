@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -13,6 +13,7 @@ from falsiq.benchmark import EvalTask, load_task
 from falsiq.evaluation import (
     AGENT_ROLES,
     AgentRuntime,
+    EvaluationArtifact,
     EvaluationLeakageError,
     EvaluationProtocolError,
     EvaluationRuntimeError,
@@ -23,10 +24,60 @@ from falsiq.evaluation import (
     write_conformance_reports,
     write_reports,
 )
+from falsiq.evaluation import (
+    ArtifactOption as EvaluationArtifactOption,
+)
+from falsiq.evaluation import (
+    AttackCandidate as EvaluationAttackCandidate,
+)
 from falsiq.evaluation import TestResult as EvaluationTestResult
 
 FIXTURES = Path(__file__).parent / "fixtures" / "eval"
 ATTACKER_ROLES = tuple(role for role in AGENT_ROLES if role.startswith("attacker."))
+
+
+def evaluation_artifact(
+    *, artifact_type: Literal["scenario", "transcript"] = "scenario", words: int = 1
+) -> EvaluationArtifact:
+    return EvaluationArtifact(
+        type=artifact_type,
+        body="word " * words,
+        options=[
+            EvaluationArtifactOption(key="A", body="accept it"),
+            EvaluationArtifactOption(key="B", body="reject it"),
+        ],
+    )
+
+
+def test_evaluation_consequence_contract_enforces_the_narrative_budget() -> None:
+    candidate = EvaluationAttackCandidate(
+        attack_id="downstream",
+        klass="consequence",
+        artifact=evaluation_artifact(words=150),
+        settles=["operational consequence"],
+        hate_scenario="month-later maintenance becomes unsafe",
+        render_cost="trivial",
+    )
+    assert len(candidate.artifact.body.split()) == 150
+
+    with pytest.raises(ValidationError, match="consequence"):
+        EvaluationAttackCandidate(
+            attack_id="too-long",
+            klass="consequence",
+            artifact=evaluation_artifact(words=151),
+            settles=["operational consequence"],
+            hate_scenario="month-later maintenance becomes unsafe",
+            render_cost="trivial",
+        )
+    with pytest.raises(ValidationError, match="consequence"):
+        EvaluationAttackCandidate(
+            attack_id="wrong-kind",
+            klass="consequence",
+            artifact=evaluation_artifact(artifact_type="transcript"),
+            settles=["operational consequence"],
+            hate_scenario="month-later maintenance becomes unsafe",
+            render_cost="trivial",
+        )
 
 
 class ScriptedRuntime:
@@ -78,9 +129,7 @@ class ScriptedRuntime:
                         "artifact": {
                             "type": "transcript",
                             "body": (
-                                "404 is retried"
-                                if round_number == 1
-                                else "four requests occur"
+                                "404 is retried" if round_number == 1 else "four requests occur"
                             ),
                             "options": [
                                 {"key": "A", "body": "allow the rendered behavior"},
@@ -116,9 +165,7 @@ class ScriptedRuntime:
         elif role == "selector":
             selected = sorted(
                 payload["candidates"],
-                key=lambda item: -(
-                    len(item["settles"]) + len(item["silent_settles"])
-                ),
+                key=lambda item: -(len(item["settles"]) + len(item["silent_settles"])),
             )
             response = {
                 "request_id": request.request_id,
@@ -128,11 +175,7 @@ class ScriptedRuntime:
         elif role == "principal":
             attack_id = str(payload["attack"]["attack_id"])
             if attack_id == "a404":
-                amendment = (
-                    "stop after three total attempts"
-                    if self.leak
-                    else None
-                )
+                amendment = "stop after three total attempts" if self.leak else None
                 response = {
                     "request_id": request.request_id,
                     "verdict": "amend" if self.leak else "forbidden",
@@ -215,9 +258,7 @@ class ScriptedRuntime:
                 "request_id": request.request_id,
                 "summary": "materialize the deterministic smoke implementation",
                 "changed_paths": ["implementation.txt"],
-                "files": [
-                    {"path": "implementation.txt", "content": implementation + "\n"}
-                ],
+                "files": [{"path": "implementation.txt", "content": implementation + "\n"}],
                 "deleted_paths": [],
                 "visible_test_result": {
                     "status": "passed",
@@ -353,9 +394,7 @@ def test_replay_runtime_captures_private_transcripts_and_resumes_without_recordi
     tmp_path: Path, smoke_task: EvalTask
 ) -> None:
     recordings = tmp_path / "recordings"
-    expected = run_evaluation(
-        (smoke_task,), runtime=ScriptedRuntime(recording_dir=recordings)
-    )
+    expected = run_evaluation((smoke_task,), runtime=ScriptedRuntime(recording_dir=recordings))
     transcripts = tmp_path / "private" / "transcripts"
     runtime = AgentRuntime(recordings, transcripts)
 
@@ -432,9 +471,7 @@ def test_all_intended_rounds_are_flagged_as_a_sycophancy_signal(
                     "choice": "B",
                     "amendment_text": None,
                     "implicated_requirement_ids": (
-                        ["LR1"]
-                        if request.payload["attack"]["attack_id"] == "a404"
-                        else []
+                        ["LR1"] if request.payload["attack"]["attack_id"] == "a404" else []
                     ),
                 }
             return response
@@ -594,8 +631,7 @@ def test_three_condition_builds_are_isolated_and_judged_blindly(
     ]
     assert all("condition" not in request.payload for request in judge_calls)
     assert all(
-        str(request.payload["candidate_id"]).startswith("candidate-")
-        for request in judge_calls
+        str(request.payload["candidate_id"]).startswith("candidate-") for request in judge_calls
     )
     assert not (FIXTURES / "workspace" / "implementation.txt").exists()
 
@@ -634,9 +670,7 @@ def test_conformance_reports_are_redacted_and_reproducible(
     assert "hidden detail" not in rendered
 
 
-def test_builder_and_judge_replay_is_resumable(
-    tmp_path: Path, smoke_task: EvalTask
-) -> None:
+def test_builder_and_judge_replay_is_resumable(tmp_path: Path, smoke_task: EvalTask) -> None:
     recordings = tmp_path / "recordings"
 
     def hidden_tests(task: EvalTask, workspace: Path) -> EvaluationTestResult:
@@ -760,9 +794,7 @@ def test_builder_path_traversal_is_rejected_without_writing_outside_workspace(
     assert not (tmp_path / "workspaces" / "smoke_retry" / "escape.txt").exists()
 
 
-def test_judge_must_score_every_hidden_requirement(
-    tmp_path: Path, smoke_task: EvalTask
-) -> None:
+def test_judge_must_score_every_hidden_requirement(tmp_path: Path, smoke_task: EvalTask) -> None:
     class IncompleteJudgeRuntime(ScriptedRuntime):
         def _response(self, request: AgentRequest) -> dict[str, Any]:
             response = super()._response(request)

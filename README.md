@@ -88,6 +88,8 @@ three selected content digests. The CLI recomputes exact scores and composition,
 then appends all selected attacks as one ledger batch. No candidate or free-form
 selection rationale is persisted. Round two is accepted only after every
 round-one attack is ruled and at least one verdict is `amend` or `forbidden`.
+Consequence candidates are rejected unless they contain an inline `scenario`
+narrative of at most 150 whitespace-delimited words.
 
 ## Rulings and outcomes
 
