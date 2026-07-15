@@ -46,6 +46,13 @@ _TRANSACTION_FIELDS = frozenset(
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
 
+class _ExpectedHeadOmitted:
+    pass
+
+
+_EXPECTED_HEAD_OMITTED = _ExpectedHeadOmitted()
+
+
 class FalsiqError(Exception):
     """Base class for expected, user-facing Falsiq errors."""
 
@@ -748,7 +755,12 @@ class Ledger:
     def append(self, fact: FactBase | Mapping[str, object]) -> Fact:
         return self.append_batch([fact])[0]
 
-    def append_batch(self, facts: Sequence[FactBase | Mapping[str, object]]) -> tuple[Fact, ...]:
+    def append_batch(
+        self,
+        facts: Sequence[FactBase | Mapping[str, object]],
+        *,
+        expected_head: str | None | _ExpectedHeadOmitted = _EXPECTED_HEAD_OMITTED,
+    ) -> tuple[Fact, ...]:
         if not facts:
             raise LedgerValidationError("cannot append an empty fact batch")
         proposed: list[Fact] = []
@@ -767,6 +779,13 @@ class Ledger:
             self._recover_transaction_unlocked()
             existing_raw = self._read_ledger_bytes_unlocked()
             existing = self._parse_ledger_bytes(existing_raw)
+            current_head = existing[-1].id if existing else None
+            if expected_head is not _EXPECTED_HEAD_OMITTED and current_head != expected_head:
+                expected = expected_head if expected_head is not None else "<empty>"
+                current = current_head if current_head is not None else "<empty>"
+                raise LedgerValidationError(
+                    f"ledger head changed: expected {expected}, found {current}; retry the command"
+                )
             validate_fact_sequence([*existing, *proposed])
             try:
                 self._write_transaction_journal_unlocked(existing_raw, encoded)

@@ -200,6 +200,23 @@ def test_empty_batches_are_rejected_without_writes(tmp_path: Path) -> None:
     assert ledger.path.read_bytes() == b""
 
 
+def test_expected_head_is_checked_under_the_append_lock_including_empty_ledger(
+    tmp_path: Path,
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    first = root_intent(1)
+
+    ledger.append_batch([first], expected_head=None)
+    before = ledger.path.read_bytes()
+
+    with pytest.raises(LedgerValidationError, match="ledger head changed"):
+        ledger.append_batch([root_intent(2)], expected_head=None)
+    assert ledger.path.read_bytes() == before
+
+    ledger.append_batch([root_intent(2)], expected_head=first.id)
+    assert [fact.id for fact in ledger.read()] == [make_id(1), make_id(2)]
+
+
 @pytest.mark.parametrize(
     "corrupt",
     [

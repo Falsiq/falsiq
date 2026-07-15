@@ -42,3 +42,16 @@ The local live allowlist binds each agent role to one exact model identifier and
 separately lists approved task and case IDs. The runtime rejects moving aliases
 such as `latest`, wildcard identifiers, symlinked allowlists, every detected CI
 environment, and any invocation without exactly one approved subject.
+
+## D007: Attack selection is machine-verifiable
+
+Attacker batches and selector envelopes are transient. Candidates receive a
+canonical SHA-256 content digest, and the CLI recomputes the exact rational score
+and selected set before appending only the selected attacks. Selection first
+maximizes the valid set size up to three, then total score; equal totals use the
+lexicographically sorted digest set. Selector rationale is derived from these
+inputs rather than accepted as agent-authored durable state.
+
+Artifact fact paths are relative to `.falsiq/` and must remain below the owning
+`cases/<case-id>/` directory. This keeps collision links relocatable while the
+ledger rejects cross-case artifact references.

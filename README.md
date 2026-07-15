@@ -61,3 +61,20 @@ The approved model and subject are passed to the adapter as
 `FALSIQ_MODEL_ID` and `FALSIQ_TASK_ID` or `FALSIQ_CASE_ID`. Keep provider
 credentials in the adapter environment, never in argv. Transcripts deliberately
 exclude argv, environment variables, stdout diagnostics, and stderr logs.
+
+## Attack rounds
+
+Class-specific attackers emit strict disposable candidate batches. After
+normalization and selection, append one machine-verified round envelope and
+render its open collisions:
+
+```console
+falsiq attack add -f selector-round.json
+falsiq collide --case 01ARZ3NDEKTSV4RRFFQ69G5FAV
+```
+
+The selector envelope contains at most 20 canonical candidate records and up to
+three selected content digests. The CLI recomputes exact scores and composition,
+then appends all selected attacks as one ledger batch. No candidate or free-form
+selection rationale is persisted. Round two is accepted only after every
+round-one attack is ruled and at least one verdict is `amend` or `forbidden`.

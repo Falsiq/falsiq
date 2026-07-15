@@ -4,12 +4,19 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from pydantic import ValidationError
 
 from . import __version__
-from .facts import IntentFact, new_ulid, utc_timestamp
-from .ledger import FalsiqError, Ledger, canonical_fact_json
+from .attacks import (
+    RoundGateError,
+    SelectionEnvelope,
+    append_attack_round,
+    write_collision_file,
+)
+from .facts import AttackFact, IntentFact, RulingFact, new_ulid, utc_timestamp
+from .ledger import FalsiqError, Ledger, LedgerValidationError, canonical_fact_json
 
 
 def _init_command(_args: argparse.Namespace) -> int:
@@ -73,6 +80,51 @@ def _state_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _attack_add_command(args: argparse.Namespace) -> int:
+    envelope = SelectionEnvelope.model_validate_json(args.file.read_bytes())
+    ledger = Ledger.open()
+    facts = ledger.read()
+    case_exists = any(
+        isinstance(fact, IntentFact)
+        and fact.source == "user"
+        and fact.id == envelope.case_id
+        for fact in facts
+    )
+    if not case_exists:
+        raise LedgerValidationError(f"unknown case: {envelope.case_id}")
+    ledger_head = facts[-1].id if facts else None
+    existing_attacks = [
+        fact
+        for fact in facts
+        if isinstance(fact, AttackFact) and fact.case_id == envelope.case_id
+    ]
+    active_rulings: dict[str, RulingFact] = {}
+    for fact in facts:
+        if isinstance(fact, RulingFact) and fact.case_id == envelope.case_id:
+            active_rulings[fact.attack_id] = fact
+    appended = append_attack_round(
+        envelope,
+        existing_attacks=existing_attacks,
+        active_rulings=active_rulings,
+        append_batch=lambda batch: ledger.append_batch(batch, expected_head=ledger_head),
+    )
+    for fact in appended:
+        print(fact.id)
+    return 0
+
+
+def _collide_command(args: argparse.Namespace) -> int:
+    ledger = Ledger.open()
+    state = ledger.state(args.case_id)
+    open_values = state.get("open_attacks")
+    if not isinstance(open_values, list) or not open_values:
+        raise LedgerValidationError(f"case {args.case_id} has no open attacks")
+    attacks = [AttackFact.model_validate(value) for value in open_values]
+    path = write_collision_file(ledger.root, args.case_id, attacks)
+    print(path)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="falsiq")
     parser.add_argument(
@@ -101,6 +153,16 @@ def build_parser() -> argparse.ArgumentParser:
     state_parser.add_argument("--json", action="store_true")
     state_parser.add_argument("--case", dest="case_id")
     state_parser.set_defaults(handler=_state_command)
+
+    attack_parser = commands.add_parser("attack", help="validate and append attack rounds")
+    attack_commands = attack_parser.add_subparsers(dest="attack_command", required=True)
+    attack_add_parser = attack_commands.add_parser("add", help="append a selector-approved round")
+    attack_add_parser.add_argument("-f", "--file", type=Path, required=True)
+    attack_add_parser.set_defaults(handler=_attack_add_command)
+
+    collide_parser = commands.add_parser("collide", help="render a case's open attacks")
+    collide_parser.add_argument("--case", dest="case_id", required=True)
+    collide_parser.set_defaults(handler=_collide_command)
     return parser
 
 
@@ -115,6 +177,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         message = exc.errors(include_url=False)[0]["msg"]
         print(f"error: {message}", file=sys.stderr)
         return 2
-    except (FalsiqError, OSError) as exc:
+    except (FalsiqError, OSError, RoundGateError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
