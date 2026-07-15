@@ -456,6 +456,23 @@ def test_collision_markdown_is_stable_safe_and_matches_golden() -> None:
     assert f"cases/{CASE_ID}/collisions/accept%20output.txt" in rendered
 
 
+def test_multi_target_collision_names_amendment_targets_and_requires_selection() -> None:
+    second_target = "01ARZ3NDEKTSV4RRFFQ69G5FC0"
+    probe = attack_fact(0).model_copy(
+        update={"targets": [INTENT_ID, second_target]}
+    )
+
+    rendered = render_collision_markdown(CASE_ID, [probe])
+
+    assert "**Amendment targets**" in rendered
+    assert f"<code>{INTENT_ID}</code>" in rendered
+    assert f"<code>{second_target}</code>" in rendered
+    assert (
+        f'falsiq rule {probe.id} amend --text "<replacement intent>" '
+        "--intent <active-target-id>"
+    ) in rendered
+
+
 def test_collision_writer_uses_case_round_path_and_is_idempotent(tmp_path: Path) -> None:
     attacks = collision_attacks()
 

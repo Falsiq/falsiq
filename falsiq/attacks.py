@@ -405,12 +405,11 @@ def _rule_commands(attack: AttackFact) -> list[str]:
                 f"falsiq rule {attack.id} forbidden",
             ]
         )
-    commands.extend(
-        [
-            f"falsiq rule {attack.id} dont_care",
-            f'falsiq rule {attack.id} amend --text "<replacement intent>"',
-        ]
-    )
+    commands.append(f"falsiq rule {attack.id} dont_care")
+    amend = f'falsiq rule {attack.id} amend --text "<replacement intent>"'
+    if len(attack.targets) > 1:
+        amend += " --intent <active-target-id>"
+    commands.append(amend)
     return commands
 
 
@@ -450,10 +449,19 @@ def render_collision_markdown(case_id: str, attacks: Sequence[AttackFact]) -> st
         "",
     ]
     for position, attack in enumerate(ordered, start=1):
+        target_lines: list[str] = []
+        if len(attack.targets) > 1:
+            target_lines = [
+                "**Amendment targets**",
+                "",
+                *[f"- <code>{target}</code>" for target in attack.targets],
+                "",
+            ]
         lines.extend(
             [
                 f"## A{position} [{attack.klass}]",
                 "",
+                *target_lines,
                 "**Settles**",
                 "",
                 *[f"- <code>{_escape_inline(decision)}</code>" for decision in attack.settles],
