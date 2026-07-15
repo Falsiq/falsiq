@@ -66,6 +66,21 @@ def _render_case(case: dict[str, object]) -> list[str]:
     rulings = case["rulings"]
     open_attacks = case["open_attacks"]
     lines.append(f"Rulings: {len(rulings) if isinstance(rulings, list) else 0}")
+    if isinstance(rulings, list):
+        for ruling in rulings:
+            if not isinstance(ruling, dict):
+                continue
+            ruling_id = ruling.get("id")
+            verdict = ruling.get("verdict")
+            age_facts = ruling.get("age_facts")
+            if not isinstance(ruling_id, str) or not isinstance(verdict, str):
+                continue
+            if not isinstance(age_facts, int):
+                continue
+            noun = "fact" if age_facts == 1 else "facts"
+            lines.append(
+                f"Ruling {ruling_id}: {verdict} ({age_facts} later case {noun})"
+            )
     lines.append(f"Open attacks: {len(open_attacks) if isinstance(open_attacks, list) else 0}")
     return lines
 

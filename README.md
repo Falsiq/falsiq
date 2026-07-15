@@ -104,6 +104,10 @@ falsiq rule ATTACK_ID intended --choice A
 falsiq rule ATTACK_ID amend --text "Reject empty input" --intent INTENT_ID
 ```
 
+`falsiq state` renders each active ruling with its deterministic ledger age: the
+number of later facts in that case. This surfaces stale commitments without
+making state output depend on the wall clock.
+
 Record post-implementation feedback separately:
 
 ```console

@@ -610,14 +610,24 @@ def test_case_state_is_deterministic_and_option_aware(tmp_path: Path) -> None:
         supersedes=first.id,
     )
     ledger.append(second)
+    feedback = OutcomeFact(
+        id=make_id(6),
+        ts=TS,
+        case_id=intent.case_id,
+        otype="accepted",
+        trace="n/a",
+        notes="The replacement ruling held.",
+    )
+    ledger.append(feedback)
 
     state = ledger.state(intent.case_id)
     assert state == ledger.state(intent.case_id)
-    assert state["ledger_head"] == second.id
-    assert state["case_head"] == second.id
+    assert state["ledger_head"] == feedback.id
+    assert state["case_head"] == feedback.id
     assert [item["id"] for item in state["intents"]] == [intent.id]
     assert [item["id"] for item in state["open_attacks"]] == [open_probe.id]
     assert state["rulings"][0]["id"] == second.id
+    assert state["rulings"][0]["age_facts"] == 1
     assert state["rulings"][0]["option_states"] == {"A": "unruled", "B": "forbidden"}
 
 

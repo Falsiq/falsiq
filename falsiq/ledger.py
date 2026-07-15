@@ -422,6 +422,7 @@ def derive_case_state(facts: Sequence[Fact], case_id: str) -> dict[str, object]:
         if isinstance(fact, IntentFact) and fact.id not in superseded_intents
     ]
     attacks = [fact for fact in case_facts if isinstance(fact, AttackFact)]
+    case_positions = {fact.id: position for position, fact in enumerate(case_facts)}
     active_rulings: dict[str, RulingFact] = {}
     for fact in case_facts:
         if isinstance(fact, RulingFact):
@@ -434,6 +435,7 @@ def derive_case_state(facts: Sequence[Fact], case_id: str) -> dict[str, object]:
             continue
         row = ruling.model_dump(mode="json")
         row["attack_class"] = attack.klass
+        row["age_facts"] = len(case_facts) - case_positions[ruling.id] - 1
         row["option_states"] = _option_states(attack, ruling)
         ruling_rows.append(row)
 

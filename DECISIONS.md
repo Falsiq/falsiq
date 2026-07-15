@@ -169,3 +169,11 @@ the skill guard verifies regular non-symlinked path components, the brief and
 stub content digests, and the exact test-directory membership. Missing, changed,
 symlinked, or extra artifacts require re-derivation; request directories and the
 per-case derivation lock are outside the committed artifact set.
+
+## D016: Ruling age is measured in later case facts
+
+Wall-clock age would make identical ledgers derive different state over time.
+Each active ruling instead carries the number of later facts in its case, and
+the human state view renders that value. This stable ledger age highlights
+commitments that survived substantial subsequent activity while retaining the
+ruling's canonical timestamp for chronological inspection.

@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from falsiq.cli import main
+from falsiq.cli import _render_state, main
 from falsiq.facts import new_ulid
 
 
@@ -68,6 +68,25 @@ def test_state_human_output_is_stable_and_readable(tmp_path: Path, monkeypatch, 
     assert f"Case {case_id}\n" in first
     assert "Intent: Ship it\n" in first
     assert "Open attacks: 0\n" in first
+
+
+def test_state_human_output_surfaces_active_ruling_age() -> None:
+    rendered = _render_state(
+        {
+            "case_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "intents": [],
+            "rulings": [
+                {
+                    "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+                    "verdict": "forbidden",
+                    "age_facts": 3,
+                }
+            ],
+            "open_attacks": [],
+        }
+    )
+
+    assert "Ruling 01ARZ3NDEKTSV4RRFFQ69G5FAX: forbidden (3 later case facts)" in rendered
 
 
 def test_cli_errors_are_concise_and_do_not_mutate_the_ledger(
