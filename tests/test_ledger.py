@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import random
+import stat
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -77,6 +80,46 @@ def attack(
         render_cost="trivial",
         round=round_number,
     )
+
+
+def amendment_batch(
+    number: int, intent: IntentFact, probe: AttackFact, text: str = "Reject empty input."
+) -> tuple[RulingFact, IntentFact]:
+    ruling = RulingFact(
+        id=make_id(number),
+        ts=TS,
+        case_id=intent.case_id,
+        attack_id=probe.id,
+        verdict="amend",
+        amendment_text=text,
+    )
+    amended = IntentFact(
+        id=make_id(number + 1),
+        ts=TS,
+        case_id=intent.case_id,
+        text=text,
+        source="amendment",
+        supersedes=intent.id,
+        source_ruling_id=ruling.id,
+    )
+    return ruling, amended
+
+
+def append_root_in_process(repo: str, number: int) -> str:
+    ledger = Ledger.open(repo)
+    fact = root_intent(number)
+    ledger.append(fact)
+    return fact.id
+
+
+def encode_canonical_journal(payload: dict[str, object]) -> bytes:
+    return (
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode()
+
+
+def rewrite_canonical_journal(path: Path, payload: dict[str, object]) -> None:
+    path.write_bytes(encode_canonical_journal(payload))
 
 
 def test_repository_discovery_walks_from_nested_directory(tmp_path: Path) -> None:
@@ -165,7 +208,7 @@ def test_empty_batches_are_rejected_without_writes(tmp_path: Path) -> None:
         b'{"case_id": "spaced"}\n',
         b"{}",
         b"\n",
-        b"{\"schema_version\":1}\r\n",
+        b'{"schema_version":1}\r\n',
         b"\xff\n",
     ],
 )
@@ -289,9 +332,7 @@ def test_reruling_must_supersede_the_active_ruling(tmp_path: Path) -> None:
     with pytest.raises(LedgerValidationError, match="active ruling"):
         ledger.append(missing_supersession)
 
-    second = missing_supersession.model_copy(
-        update={"id": make_id(5), "supersedes": first.id}
-    )
+    second = missing_supersession.model_copy(update={"id": make_id(5), "supersedes": first.id})
     ledger.append(second)
     stale = RulingFact(
         id=make_id(6),
@@ -603,3 +644,345 @@ def test_concurrent_writers_are_serialized_without_lost_facts(tmp_path: Path) ->
     assert len(facts) == 32
     assert {fact.id for fact in facts} == expected
     assert len(Ledger.open(repo).state()["cases"]) == 32
+
+
+def test_concurrent_process_writers_share_the_sidecar_lock(tmp_path: Path) -> None:
+    repo = git_repo(tmp_path / "repo")
+    Ledger.initialize(repo)
+
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        expected = set(executor.map(append_root_in_process, [str(repo)] * 16, range(1, 17)))
+
+    facts = Ledger.open(repo).read()
+    assert len(facts) == 16
+    assert {fact.id for fact in facts} == expected
+    assert not Ledger.open(repo).journal_path.exists()
+
+
+def test_transaction_journal_is_durable_before_ledger_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    events: list[str] = []
+    write_journal = Ledger._write_transaction_journal_unlocked
+    append_bytes = Ledger._append_transaction_bytes_unlocked
+
+    def journal_spy(self: Ledger, prefix: bytes, pending: bytes) -> None:
+        write_journal(self, prefix, pending)
+        assert self.journal_path.is_file()
+        events.append("journal")
+
+    def append_spy(self: Ledger, original_size: int, pending: bytes) -> None:
+        assert self.journal_path.is_file()
+        events.append("append")
+        append_bytes(self, original_size, pending)
+
+    monkeypatch.setattr(Ledger, "_write_transaction_journal_unlocked", journal_spy)
+    monkeypatch.setattr(Ledger, "_append_transaction_bytes_unlocked", append_spy)
+
+    ledger.append(root_intent(1))
+
+    assert events == ["journal", "append"]
+    assert not ledger.journal_path.exists()
+
+
+def test_recovery_rolls_back_a_complete_fact_prefix_of_an_amendment_batch(
+    tmp_path: Path,
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent(1)
+    probe = attack(2, intent.case_id, intent.id)
+    ledger.append_batch([intent, probe])
+    before = ledger.path.read_bytes()
+    ruling, amended = amendment_batch(3, intent, probe)
+    pending = (canonical_fact_json(ruling) + "\n" + canonical_fact_json(amended) + "\n").encode()
+    first_fact_end = pending.index(b"\n") + 1
+    ledger._write_transaction_journal_unlocked(before, pending)
+    with ledger.path.open("ab") as stream:
+        stream.write(pending[:first_fact_end])
+
+    recovered = ledger.read()
+
+    assert recovered == (intent, probe)
+    assert ledger.path.read_bytes() == before
+    assert not ledger.journal_path.exists()
+
+
+def test_recovery_rolls_back_a_partial_ledger_append(tmp_path: Path) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent(1)
+    probe = attack(2, intent.case_id, intent.id)
+    ledger.append_batch([intent, probe])
+    before = ledger.path.read_bytes()
+    ruling, amended = amendment_batch(3, intent, probe)
+    pending = (canonical_fact_json(ruling) + "\n" + canonical_fact_json(amended) + "\n").encode()
+    ledger._write_transaction_journal_unlocked(before, pending)
+    with ledger.path.open("ab") as stream:
+        stream.write(pending[: len(pending) // 2])
+
+    assert ledger.read() == (intent, probe)
+    assert ledger.path.read_bytes() == before
+    assert not ledger.journal_path.exists()
+
+
+def test_append_failure_automatically_recovers_a_partial_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    before = ledger.path.read_bytes()
+
+    def fail_after_partial_write(self: Ledger, original_size: int, pending: bytes) -> None:
+        assert original_size == len(before)
+        with self.path.open("ab") as stream:
+            stream.write(pending[: len(pending) // 2])
+        raise OSError("injected interrupted write")
+
+    monkeypatch.setattr(Ledger, "_append_transaction_bytes_unlocked", fail_after_partial_write)
+
+    with pytest.raises(LedgerValidationError, match="interrupted write"):
+        ledger.append(root_intent(1))
+
+    assert ledger.path.read_bytes() == before
+    assert not ledger.journal_path.exists()
+
+
+def test_recovery_removes_a_durable_journal_when_no_ledger_bytes_were_written(
+    tmp_path: Path,
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent(1)
+    ledger.append(intent)
+    before = ledger.path.read_bytes()
+    pending = (canonical_fact_json(root_intent(2)) + "\n").encode()
+    ledger._write_transaction_journal_unlocked(before, pending)
+
+    assert ledger.read() == (intent,)
+    assert ledger.path.read_bytes() == before
+    assert not ledger.journal_path.exists()
+
+
+def test_recovery_syncs_and_commits_a_full_append_before_journal_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent(1)
+    probe = attack(2, intent.case_id, intent.id)
+    ledger.append_batch([intent, probe])
+    before = ledger.path.read_bytes()
+    ruling, amended = amendment_batch(3, intent, probe)
+    pending = (canonical_fact_json(ruling) + "\n" + canonical_fact_json(amended) + "\n").encode()
+    ledger._write_transaction_journal_unlocked(before, pending)
+    with ledger.path.open("ab") as stream:
+        stream.write(pending)
+    events: list[str] = []
+    sync_ledger = Ledger._sync_ledger_unlocked
+    remove_journal = Ledger._remove_transaction_journal_unlocked
+
+    def sync_spy(self: Ledger, observed: bytes) -> None:
+        sync_ledger(self, observed)
+        events.append("ledger fsync")
+
+    def remove_spy(self: Ledger) -> None:
+        assert events == ["ledger fsync"]
+        remove_journal(self)
+        events.append("journal cleanup")
+
+    monkeypatch.setattr(Ledger, "_sync_ledger_unlocked", sync_spy)
+    monkeypatch.setattr(Ledger, "_remove_transaction_journal_unlocked", remove_spy)
+
+    recovered = ledger.read()
+
+    assert recovered == (intent, probe, ruling, amended)
+    assert ledger.path.read_bytes() == before + pending
+    assert not ledger.journal_path.exists()
+    assert events == ["ledger fsync", "journal cleanup"]
+
+
+@pytest.mark.parametrize("journal_bytes", [b"not json\n", b"{}\n", b"{}"])
+def test_recovery_rejects_corrupt_transaction_journals_without_mutation(
+    tmp_path: Path, journal_bytes: bytes
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent(1)
+    ledger.append(intent)
+    before = ledger.path.read_bytes()
+    ledger.journal_path.write_bytes(journal_bytes)
+
+    with pytest.raises(LedgerIntegrityError, match="transaction journal"):
+        ledger.read()
+
+    assert ledger.path.read_bytes() == before
+    assert ledger.journal_path.read_bytes() == journal_bytes
+
+
+@pytest.mark.parametrize(
+    ("changes", "error"),
+    [
+        ({"version": 2}, "version"),
+        ({"original_size": -1}, "original_size"),
+        ({"append_size": 0}, "append_size"),
+        ({"prefix_sha256": "not-a-digest"}, "prefix digest"),
+        ({"append_sha256": "not-a-digest"}, "append digest"),
+        ({"append_b64": 7}, "append payload"),
+        ({"append_b64": "!"}, "append payload"),
+        ({"append_size": 999}, "append digest"),
+        ({"append_sha256": "0" * 64}, "append digest"),
+    ],
+)
+def test_recovery_rejects_invalid_canonical_journal_fields(
+    tmp_path: Path, changes: dict[str, object], error: str
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    before = ledger.path.read_bytes()
+    pending = (canonical_fact_json(root_intent(1)) + "\n").encode()
+    ledger._write_transaction_journal_unlocked(before, pending)
+    payload = json.loads(ledger.journal_path.read_text(encoding="utf-8"))
+    payload.update(changes)
+    rewrite_canonical_journal(ledger.journal_path, payload)
+
+    with pytest.raises(LedgerIntegrityError, match=error):
+        ledger.read()
+
+    assert ledger.path.read_bytes() == before
+    assert ledger.journal_path.exists()
+
+
+def test_recovery_rejects_a_journal_payload_without_a_complete_line(tmp_path: Path) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    pending = b"incomplete"
+    payload: dict[str, object] = {
+        "append_b64": base64.b64encode(pending).decode("ascii"),
+        "append_sha256": hashlib.sha256(pending).hexdigest(),
+        "append_size": len(pending),
+        "original_size": 0,
+        "prefix_sha256": hashlib.sha256(b"").hexdigest(),
+        "version": 1,
+    }
+    rewrite_canonical_journal(ledger.journal_path, payload)
+
+    with pytest.raises(LedgerIntegrityError, match="payload is truncated"):
+        ledger.read()
+
+
+def test_recovery_rejects_a_noncanonical_or_extended_journal(tmp_path: Path) -> None:
+    for suffix, transform, error in (
+        (
+            "pretty",
+            lambda payload: json.dumps(payload, indent=2).encode() + b"\n",
+            "canonical",
+        ),
+        (
+            "extended",
+            lambda payload: encode_canonical_journal(payload | {"extra": True}),
+            "schema",
+        ),
+    ):
+        ledger = Ledger.initialize(git_repo(tmp_path / suffix))
+        pending = (canonical_fact_json(root_intent(1)) + "\n").encode()
+        ledger._write_transaction_journal_unlocked(b"", pending)
+        payload = json.loads(ledger.journal_path.read_text(encoding="utf-8"))
+        ledger.journal_path.write_bytes(transform(payload))
+
+        with pytest.raises(LedgerIntegrityError, match=error):
+            ledger.read()
+
+
+def test_recovery_rejects_a_journal_prefix_digest_mismatch_without_mutation(
+    tmp_path: Path,
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent(1)
+    ledger.append(intent)
+    before = ledger.path.read_bytes()
+    pending = (canonical_fact_json(root_intent(2)) + "\n").encode()
+    ledger._write_transaction_journal_unlocked(before, pending)
+    journal = json.loads(ledger.journal_path.read_text(encoding="utf-8"))
+    journal["prefix_sha256"] = "0" * 64
+    ledger.journal_path.write_text(
+        json.dumps(journal, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LedgerIntegrityError, match="prefix digest"):
+        ledger.read()
+
+    assert ledger.path.read_bytes() == before
+    assert ledger.journal_path.exists()
+
+
+def test_recovery_rejects_stale_journal_bytes_without_rolling_back_valid_data(
+    tmp_path: Path,
+) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent(1)
+    probe = attack(2, intent.case_id, intent.id)
+    ledger.append_batch([intent, probe])
+    before = ledger.path.read_bytes()
+    amendment, amended = amendment_batch(3, intent, probe)
+    planned = (canonical_fact_json(amendment) + "\n" + canonical_fact_json(amended) + "\n").encode()
+    actual = RulingFact(
+        id=make_id(5),
+        ts=TS,
+        case_id=intent.case_id,
+        attack_id=probe.id,
+        verdict="intended",
+    )
+    actual_bytes = (canonical_fact_json(actual) + "\n").encode()
+    ledger._write_transaction_journal_unlocked(before, planned)
+    with ledger.path.open("ab") as stream:
+        stream.write(actual_bytes)
+
+    with pytest.raises(LedgerIntegrityError, match="pending append"):
+        ledger.read()
+
+    assert ledger.path.read_bytes() == before + actual_bytes
+    assert ledger.journal_path.exists()
+
+
+def test_stale_completed_journal_never_rolls_back_acknowledged_suffix(tmp_path: Path) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    intent = root_intent(1)
+    probe = attack(2, intent.case_id, intent.id)
+    ledger.append_batch([intent, probe])
+    before = ledger.path.read_bytes()
+    ruling, amended = amendment_batch(3, intent, probe)
+    pending = (canonical_fact_json(ruling) + "\n" + canonical_fact_json(amended) + "\n").encode()
+    ledger.append_batch([ruling, amended])
+    outcome = OutcomeFact(
+        id=make_id(5),
+        ts=TS,
+        case_id=intent.case_id,
+        otype="accepted",
+        trace="n/a",
+        notes="Acknowledged after the amendment.",
+    )
+    ledger.append(outcome)
+    acknowledged = ledger.path.read_bytes()
+    ledger._write_transaction_journal_unlocked(before, pending)
+
+    assert ledger.read() == (intent, probe, ruling, amended, outcome)
+    assert ledger.path.read_bytes() == acknowledged
+    assert not ledger.journal_path.exists()
+
+
+def test_recovery_rejects_a_symlinked_journal_without_following_it(tmp_path: Path) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    ledger.append(root_intent(1))
+    outside = tmp_path / "outside-journal"
+    outside.write_text("do not touch", encoding="utf-8")
+    ledger.journal_path.symlink_to(outside)
+
+    with pytest.raises(LedgerIntegrityError, match="symlink"):
+        ledger.read()
+
+    assert outside.read_text(encoding="utf-8") == "do not touch"
+
+
+def test_transaction_journal_is_private(tmp_path: Path) -> None:
+    ledger = Ledger.initialize(git_repo(tmp_path / "repo"))
+    prefix = ledger.path.read_bytes()
+    pending = (canonical_fact_json(root_intent(1)) + "\n").encode()
+
+    ledger._write_transaction_journal_unlocked(prefix, pending)
+
+    assert stat.S_IMODE(ledger.journal_path.stat().st_mode) == 0o600
