@@ -78,3 +78,22 @@ three selected content digests. The CLI recomputes exact scores and composition,
 then appends all selected attacks as one ledger batch. No candidate or free-form
 selection rationale is persisted. Round two is accepted only after every
 round-one attack is ruled and at least one verdict is `amend` or `forbidden`.
+
+## Offline evaluation
+
+The evaluation harness replays strict role-specific agent recordings, captures
+owner-private resumable transcripts, and writes redacted JSON, CSV, and
+Markdown metrics. It compares Falsiq collisions with a naive-question baseline
+under the same maximum rounds and interactions. There is no live execution path
+in the harness itself.
+
+```console
+uv run python eval/run.py \
+  --task path/to/task.json \
+  --recordings /private/recordings \
+  --private-run-dir /private/run \
+  --reports reports
+```
+
+Use `--resume` to reuse an exact captured request/response transcript. Smoke
+tasks under `tests/fixtures/eval/` are test data, not benchmark candidates.

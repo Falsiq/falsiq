@@ -55,3 +55,11 @@ inputs rather than accepted as agent-authored durable state.
 Artifact fact paths are relative to `.falsiq/` and must remain below the owning
 `cases/<case-id>/` directory. This keeps collision links relocatable while the
 ledger rejects cross-case artifact references.
+
+## D008: Evaluation outputs are split by sensitivity
+
+Replay recordings and captured transcripts contain hidden task content and stay
+in an owner-private run directory. Public JSON, CSV, and Markdown reports carry
+only stable task IDs, strata, and numeric metrics. The replay-only harness has
+no live-agent switch; authorized live recordings are captured separately before
+evaluation.

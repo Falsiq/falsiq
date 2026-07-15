@@ -13,4 +13,6 @@ This is less restrictive than the Falsiq principal because a targeted question
 does not need to be a rendered collision.
 
 Return only one JSON object with `request_id`, `answer`, and
-`implicated_requirement_ids`. Do not wrap it in Markdown or add commentary.
+`implicated_requirement_ids`. The IDs must exist in the supplied hidden task and
+must contain only requirements specifically touched by this question.
+Do not wrap it in Markdown or add commentary.
