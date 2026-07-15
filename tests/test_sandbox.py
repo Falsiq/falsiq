@@ -84,7 +84,14 @@ def test_init_adds_managed_ignore_without_replacing_user_rules(
     assert main(["init"]) == 0
     capsys.readouterr()
     first = ignore_path.read_bytes()
-    assert first == b"# local rules\n*.private\n/sandbox/\n"
+    assert first == (
+        b"# local rules\n*.private\n"
+        b"/sandbox/\n"
+        b"/.ledger.lock\n"
+        b"/.ledger.txn\n"
+        b"/.ledger.txn.*\n"
+        b"/cases/*/derived/.derive.lock\n"
+    )
 
     assert main(["init"]) == 0
     capsys.readouterr()
@@ -98,12 +105,44 @@ def test_init_preserves_an_existing_managed_ignore_byte_for_byte(tmp_path: Path)
     state_dir = root / ".falsiq"
     state_dir.mkdir()
     ignore_path = state_dir / ".gitignore"
-    before = b"# before\r\n/sandbox/\r\n*.local\r\n"
+    before = (
+        b"# before\r\n"
+        b"/sandbox/\r\n"
+        b"/.ledger.lock\r\n"
+        b"/.ledger.txn\r\n"
+        b"/.ledger.txn.*\r\n"
+        b"/cases/*/derived/.derive.lock\r\n"
+        b"*.local\r\n"
+    )
     ignore_path.write_bytes(before)
 
     Ledger.initialize(root)
 
     assert ignore_path.read_bytes() == before
+
+
+def test_init_managed_rules_ignore_only_runtime_sidecars(tmp_path: Path) -> None:
+    root = tmp_path / "target"
+    root.mkdir()
+    git(root, "init", "--initial-branch=main")
+
+    ledger = Ledger.initialize(root)
+    case_id = "01J00000000000000000000000"
+    sidecars = (
+        ledger.state_dir / ".ledger.lock",
+        ledger.state_dir / ".ledger.txn",
+        ledger.state_dir / ".ledger.txn.interrupted",
+        ledger.state_dir / "cases" / case_id / "derived" / ".derive.lock",
+        ledger.state_dir / "sandbox" / ".lock",
+    )
+    for sidecar in sidecars:
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.touch()
+
+    for path in sidecars:
+        relative = path.relative_to(root).as_posix()
+        assert git(root, "check-ignore", relative).stdout.strip() == relative
+    assert not git(root, "check-ignore", ".falsiq/ledger.jsonl", check=False).stdout
 
 
 def test_init_rejects_a_symlinked_managed_ignore(tmp_path: Path) -> None:
@@ -335,9 +374,7 @@ def test_create_and_reap_share_the_same_transaction_lock(
     assert registered_worktrees(repo) == {repo.resolve()}
 
 
-def test_create_rejects_symlink_and_nonregular_lock_paths(
-    repo: Path, tmp_path: Path
-) -> None:
+def test_create_rejects_symlink_and_nonregular_lock_paths(repo: Path, tmp_path: Path) -> None:
     lock_path = repo / LOCK_PATH
     lock_path.parent.mkdir(parents=True)
     outside = tmp_path / "outside-lock"

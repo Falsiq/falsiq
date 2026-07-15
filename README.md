@@ -109,8 +109,9 @@ falsiq outcome accepted --case CASE_ID --trace n/a
 ## Prototype sandboxes
 
 Initialize Falsiq before creating a prototype worktree. Initialization manages
-the exact `/sandbox/` entry in `.falsiq/.gitignore` while preserving every
-existing ignore rule.
+exact `.falsiq/.gitignore` entries for the sandbox, advisory locks, and
+crash-journal sidecars while preserving every existing ignore rule. The durable
+`ledger.jsonl` is not ignored.
 
 ```console
 falsiq init

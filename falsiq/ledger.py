@@ -44,7 +44,13 @@ _TRANSACTION_FIELDS = frozenset(
     }
 )
 _HEX_DIGITS = frozenset("0123456789abcdef")
-_SANDBOX_IGNORE_ENTRY = b"/sandbox/"
+_MANAGED_IGNORE_ENTRIES = (
+    b"/sandbox/",
+    b"/.ledger.lock",
+    b"/.ledger.txn",
+    b"/.ledger.txn.*",
+    b"/cases/*/derived/.derive.lock",
+)
 
 
 class _ExpectedHeadOmitted:
@@ -128,8 +134,8 @@ def _fsync_directory(path: Path) -> None:
         os.close(directory_fd)
 
 
-def _ensure_sandbox_ignore(state_dir: Path) -> None:
-    """Preserve user ignore rules while adding Falsiq's managed sandbox rule."""
+def _ensure_managed_ignores(state_dir: Path) -> None:
+    """Preserve user ignore rules while adding Falsiq's runtime sidecars."""
 
     path = state_dir / ".gitignore"
     if path.is_symlink():
@@ -148,10 +154,12 @@ def _ensure_sandbox_ignore(state_dir: Path) -> None:
         while chunk := os.read(file_descriptor, 64 * 1024):
             chunks.append(chunk)
         current = b"".join(chunks)
-        if _SANDBOX_IGNORE_ENTRY in current.splitlines():
+        present = set(current.splitlines())
+        missing = [entry for entry in _MANAGED_IGNORE_ENTRIES if entry not in present]
+        if not missing:
             return
         separator = b"" if not current or current.endswith((b"\n", b"\r")) else b"\n"
-        _write_all(file_descriptor, separator + _SANDBOX_IGNORE_ENTRY + b"\n")
+        _write_all(file_descriptor, separator + b"\n".join(missing) + b"\n")
         os.fsync(file_descriptor)
     except OSError as exc:
         raise LedgerValidationError(f"could not manage .falsiq/.gitignore: {exc}") from exc
@@ -463,7 +471,7 @@ class Ledger:
         if ledger.state_dir.is_symlink():
             raise LedgerValidationError(".falsiq must not be a symlink")
         ledger.state_dir.mkdir(exist_ok=True)
-        _ensure_sandbox_ignore(ledger.state_dir)
+        _ensure_managed_ignores(ledger.state_dir)
         cases = ledger.state_dir / "cases"
         if cases.is_symlink():
             raise LedgerValidationError(".falsiq/cases must not be a symlink")

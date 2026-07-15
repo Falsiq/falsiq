@@ -96,10 +96,13 @@ Creation is restricted to `.falsiq/sandbox/<id>` and `falsiq/proto/<id>`. Reap
 is global, preserves every failure by default, and requires an explicit
 `--force` before discarding dirty prototype worktrees.
 
-The ignored manifest sidecar lock covers the complete manifest read, Git
-mutation, and durable manifest update. POSIX directory entries are fsynced after
-atomic replacement; Windows retains advisory locking and file flushes while
-directory fsync remains a documented platform no-op.
+Managed ignore rules cover the sandbox, manifest and ledger locks, transaction
+journal files, and per-case derivation locks without replacing user rules. The
+durable ledger remains visible to Git. The manifest sidecar lock covers the
+complete manifest read, Git mutation, and durable manifest update. POSIX
+directory entries are fsynced after atomic replacement; Windows retains
+advisory locking and file flushes while directory fsync remains a documented
+platform no-op.
 
 ## D012: Derivation is a head-bound external handoff
 
