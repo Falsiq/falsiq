@@ -313,7 +313,7 @@ def test_live_authorization_requires_non_ci_allowlisted_subject_and_fixed_model(
     allowlist = write_allowlist(tmp_path / "live-allowlist.json")
 
     authorization = authorize_live(
-        request(),
+        request(payload={"task": {"task_id": "task-1"}, "round": 1}),
         allowlist_path=allowlist,
         task_id="task-1",
         model_id="provider/model-2026-07-15",
@@ -323,6 +323,30 @@ def test_live_authorization_requires_non_ci_allowlisted_subject_and_fixed_model(
     assert authorization.subject_kind == "task"
     assert authorization.subject_id == "task-1"
     assert authorization.model_id == "provider/model-2026-07-15"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"task": {"task_id": "task-denied"}, "round": 1},
+        {"task_id": "task-1", "task": {"task_id": "task-denied"}},
+        {"round": 1},
+    ],
+)
+def test_live_authorization_binds_allowlisted_subject_to_request_payload(
+    tmp_path: Path,
+    payload: dict[str, object],
+) -> None:
+    allowlist = write_allowlist(tmp_path / "live-allowlist.json")
+
+    with pytest.raises(LiveExecutionDenied, match="request payload"):
+        authorize_live(
+            request(payload=payload),
+            allowlist_path=allowlist,
+            task_id="task-1",
+            model_id="provider/model-2026-07-15",
+            environ={},
+        )
 
 
 @pytest.mark.parametrize(

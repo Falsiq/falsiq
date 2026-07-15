@@ -39,7 +39,9 @@ falsiq-agent run --replay recording.json --transcript captured.json < request.js
 
 Live commands are argv after `--`; no shell is used. They additionally require
 `--live`, a task or case ID, a fixed model ID, a local allowlist, and a non-CI
-environment:
+environment. Every matching `task_id` or `case_id` anywhere in the request
+payload must identify that same allowlisted subject; a CLI flag cannot authorize
+a differently identified payload:
 
 ```json
 {

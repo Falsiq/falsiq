@@ -366,6 +366,40 @@ def _is_ci_environment(environ: Mapping[str, str]) -> bool:
     )
 
 
+def _request_subject_ids(request: AgentRequest, subject_kind: str) -> set[str]:
+    """Collect every explicitly named subject ID from a JSON request payload."""
+
+    field = f"{subject_kind}_id"
+    found: set[str] = set()
+    pending: list[JsonValue] = [request.payload]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            if field in value:
+                subject_id = value[field]
+                if not isinstance(subject_id, str):
+                    raise LiveExecutionDenied(
+                        "live request payload has an invalid subject ID"
+                    )
+                found.add(subject_id)
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return found
+
+
+def _require_request_subject(
+    request: AgentRequest,
+    *,
+    subject_kind: Literal["task", "case"],
+    subject_id: str,
+) -> None:
+    if _request_subject_ids(request, subject_kind) != {subject_id}:
+        raise LiveExecutionDenied(
+            "live request payload must identify only the allowlisted subject"
+        )
+
+
 def _load_allowlist(path: str | os.PathLike[str]) -> LiveAllowlist:
     allowlist_path = Path(path)
     try:
@@ -413,11 +447,21 @@ def authorize_live(
     if task_id is not None:
         if task_id not in allowlist.task_ids:
             raise LiveExecutionDenied("task ID is not allowlisted for live execution")
+        _require_request_subject(
+            request,
+            subject_kind="task",
+            subject_id=task_id,
+        )
         return LiveAuthorization(subject_kind="task", subject_id=task_id, model_id=model_id)
 
     assert case_id is not None
     if case_id not in allowlist.case_ids:
         raise LiveExecutionDenied("case ID is not allowlisted for live execution")
+    _require_request_subject(
+        request,
+        subject_kind="case",
+        subject_id=case_id,
+    )
     return LiveAuthorization(subject_kind="case", subject_id=case_id, model_id=model_id)
 
 

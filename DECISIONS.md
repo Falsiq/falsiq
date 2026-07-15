@@ -41,7 +41,10 @@ matches the entire request, not only its ID.
 The local live allowlist binds each agent role to one exact model identifier and
 separately lists approved task and case IDs. The runtime rejects moving aliases
 such as `latest`, wildcard identifiers, symlinked allowlists, every detected CI
-environment, and any invocation without exactly one approved subject.
+environment, and any invocation without exactly one approved subject. The
+approved subject must also be present in the request payload, and every nested
+occurrence of its `task_id` or `case_id` field must match, so a caller cannot
+authorize unrelated content by changing only the command-line flag.
 
 ## D007: Attack selection is machine-verifiable
 
