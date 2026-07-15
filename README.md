@@ -79,6 +79,23 @@ then appends all selected attacks as one ledger batch. No candidate or free-form
 selection rationale is persisted. Round two is accepted only after every
 round-one attack is ruled and at least one verdict is `amend` or `forbidden`.
 
+## Rulings and outcomes
+
+Record rulings with the exact commands rendered in the collision file. An amend
+prints both the ruling ID and linked amendment-intent ID:
+
+```console
+falsiq rule ATTACK_ID intended --choice A
+falsiq rule ATTACK_ID amend --text "Reject empty input" --intent INTENT_ID
+```
+
+Record post-implementation feedback separately:
+
+```console
+falsiq outcome rework --case CASE_ID --trace elicited --attack ATTACK_ID --notes "..."
+falsiq outcome accepted --case CASE_ID --trace n/a
+```
+
 ## Offline evaluation
 
 The evaluation harness replays strict role-specific agent recordings, captures

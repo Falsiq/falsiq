@@ -63,3 +63,12 @@ in an owner-private run directory. Public JSON, CSV, and Markdown reports carry
 only stable task IDs, strata, and numeric metrics. The replay-only harness has
 no live-agent switch; authorized live recordings are captured separately before
 evaluation.
+
+## D009: Amendments name the intent they replace
+
+An amend ruling and its linked verbatim intent are admitted as one expected-head
+ledger batch. The superseded intent must still be active and must be one of the
+attack's targets. Attacks carrying multiple targets require an explicit
+`--intent`, even when only one target remains active, so historical targets never
+make the amendment choice implicit. Re-rulings automatically supersede the
+active earlier ruling without mutating its record.

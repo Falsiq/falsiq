@@ -17,6 +17,7 @@ from .attacks import (
 )
 from .facts import AttackFact, IntentFact, RulingFact, new_ulid, utc_timestamp
 from .ledger import FalsiqError, Ledger, LedgerValidationError, canonical_fact_json
+from .rulings import RulingCommandError, build_outcome, build_ruling_batch
 
 
 def _init_command(_args: argparse.Namespace) -> int:
@@ -125,6 +126,41 @@ def _collide_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rule_command(args: argparse.Namespace) -> int:
+    ledger = Ledger.open()
+    facts = ledger.read()
+    batch = build_ruling_batch(
+        facts,
+        attack_id=args.attack_id,
+        verdict=args.verdict,
+        choice=args.choice,
+        amendment_text=args.text,
+        intent_id=args.intent_id,
+    )
+    ledger_head = facts[-1].id if facts else None
+    appended = ledger.append_batch(batch, expected_head=ledger_head)
+    for fact in appended:
+        print(fact.id)
+    return 0
+
+
+def _outcome_command(args: argparse.Namespace) -> int:
+    ledger = Ledger.open()
+    facts = ledger.read()
+    outcome = build_outcome(
+        facts,
+        case_id=args.case_id,
+        otype=args.otype,
+        trace=args.trace,
+        attack_id=args.attack_id,
+        notes=args.notes,
+    )
+    ledger_head = facts[-1].id if facts else None
+    appended = ledger.append_batch([outcome], expected_head=ledger_head)
+    print(appended[0].id)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="falsiq")
     parser.add_argument(
@@ -163,6 +199,29 @@ def build_parser() -> argparse.ArgumentParser:
     collide_parser = commands.add_parser("collide", help="render a case's open attacks")
     collide_parser.add_argument("--case", dest="case_id", required=True)
     collide_parser.set_defaults(handler=_collide_command)
+
+    rule_parser = commands.add_parser("rule", help="record or supersede an attack ruling")
+    rule_parser.add_argument("attack_id")
+    rule_parser.add_argument(
+        "verdict",
+        choices=("intended", "forbidden", "dont_care", "amend"),
+    )
+    rule_parser.add_argument("--choice")
+    rule_parser.add_argument("--text")
+    rule_parser.add_argument("--intent", dest="intent_id")
+    rule_parser.set_defaults(handler=_rule_command)
+
+    outcome_parser = commands.add_parser("outcome", help="record implementation feedback")
+    outcome_parser.add_argument("otype", choices=("rework", "accepted", "abandoned"))
+    outcome_parser.add_argument("--case", dest="case_id", required=True)
+    outcome_parser.add_argument(
+        "--trace",
+        choices=("elicited", "missable", "novel", "n/a"),
+        required=True,
+    )
+    outcome_parser.add_argument("--attack", dest="attack_id")
+    outcome_parser.add_argument("--notes", default="")
+    outcome_parser.set_defaults(handler=_outcome_command)
     return parser
 
 
@@ -177,6 +236,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         message = exc.errors(include_url=False)[0]["msg"]
         print(f"error: {message}", file=sys.stderr)
         return 2
-    except (FalsiqError, OSError, RoundGateError) as exc:
+    except (FalsiqError, OSError, RoundGateError, RulingCommandError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
