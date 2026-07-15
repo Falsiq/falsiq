@@ -18,6 +18,7 @@ from .attacks import (
 from .facts import AttackFact, IntentFact, RulingFact, new_ulid, utc_timestamp
 from .ledger import FalsiqError, Ledger, LedgerValidationError, canonical_fact_json
 from .rulings import RulingCommandError, build_outcome, build_ruling_batch
+from .sandbox import SandboxError, create_sandbox, reap_sandboxes, sandbox_json
 
 
 def _init_command(_args: argparse.Namespace) -> int:
@@ -161,6 +162,21 @@ def _outcome_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sandbox_new_command(args: argparse.Namespace) -> int:
+    sandbox = create_sandbox(Path.cwd(), args.attack_id)
+    print(sandbox_json(sandbox))
+    return 0
+
+
+def _sandbox_reap_command(args: argparse.Namespace) -> int:
+    result = reap_sandboxes(Path.cwd(), force=args.force)
+    for attack_id in result.reaped:
+        print(f"reaped {attack_id}")
+    for attack_id, error in sorted(result.failures.items()):
+        print(f"error: {attack_id}: {error}", file=sys.stderr)
+    return 2 if result.failures else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="falsiq")
     parser.add_argument(
@@ -222,6 +238,25 @@ def build_parser() -> argparse.ArgumentParser:
     outcome_parser.add_argument("--attack", dest="attack_id")
     outcome_parser.add_argument("--notes", default="")
     outcome_parser.set_defaults(handler=_outcome_command)
+
+    sandbox_parser = commands.add_parser(
+        "sandbox", help="manage disposable prototype worktrees"
+    )
+    sandbox_commands = sandbox_parser.add_subparsers(
+        dest="sandbox_command", required=True
+    )
+    sandbox_new = sandbox_commands.add_parser("new", help="create a prototype worktree")
+    sandbox_new.add_argument("attack_id", nargs="?", metavar="ID")
+    sandbox_new.set_defaults(handler=_sandbox_new_command)
+    sandbox_reap = sandbox_commands.add_parser(
+        "reap", help="remove managed prototype worktrees"
+    )
+    sandbox_reap.add_argument(
+        "--force",
+        action="store_true",
+        help="discard changes in dirty managed prototype worktrees",
+    )
+    sandbox_reap.set_defaults(handler=_sandbox_reap_command)
     return parser
 
 
@@ -236,6 +271,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         message = exc.errors(include_url=False)[0]["msg"]
         print(f"error: {message}", file=sys.stderr)
         return 2
-    except (FalsiqError, OSError, RoundGateError, RulingCommandError) as exc:
+    except (
+        FalsiqError,
+        OSError,
+        RoundGateError,
+        RulingCommandError,
+        SandboxError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

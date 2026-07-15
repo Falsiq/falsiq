@@ -96,6 +96,36 @@ falsiq outcome rework --case CASE_ID --trace elicited --attack ATTACK_ID --notes
 falsiq outcome accepted --case CASE_ID --trace n/a
 ```
 
+## Prototype sandboxes
+
+Initialize Falsiq before creating a prototype worktree. Initialization manages
+the exact `/sandbox/` entry in `.falsiq/.gitignore` while preserving every
+existing ignore rule.
+
+```console
+falsiq init
+falsiq sandbox new [01ARZ3NDEKTSV4RRFFQ69G5FAV]
+falsiq sandbox reap
+```
+
+The optional ID is a canonical ULID allocated with the same generator used for
+facts. It is a transient prototype ID, not proof that a durable attack fact
+already exists: prototypes may be rendered before candidate selection. The
+command does not infer or accept a case selector. Evidence chosen for a durable
+attack must be copied or linked through a case-scoped
+`cases/<case-id>/...` artifact path before selection is persisted.
+
+Creation uses only `.falsiq/sandbox/<id>` on `falsiq/proto/<id>`. Normal reap
+leaves dirty prototype worktrees and their manifest entries in place; use
+`falsiq sandbox reap --force` only when those changes may be discarded. Reap
+does not remove unrelated worktrees or branches.
+
+Concurrent create and reap operations serialize through the ignored
+`.falsiq/sandbox/.lock` sidecar. Manifest files are flushed, atomically
+replaced, and followed by a directory fsync where the platform supports it.
+Windows uses its byte-range advisory lock and file flush; directory fsync is a
+documented no-op because Windows does not expose the required operation.
+
 ## Offline evaluation
 
 The evaluation harness replays strict role-specific agent recordings, captures

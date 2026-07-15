@@ -44,6 +44,7 @@ _TRANSACTION_FIELDS = frozenset(
     }
 )
 _HEX_DIGITS = frozenset("0123456789abcdef")
+_SANDBOX_IGNORE_ENTRY = b"/sandbox/"
 
 
 class _ExpectedHeadOmitted:
@@ -125,6 +126,39 @@ def _fsync_directory(path: Path) -> None:
                 raise
     finally:
         os.close(directory_fd)
+
+
+def _ensure_sandbox_ignore(state_dir: Path) -> None:
+    """Preserve user ignore rules while adding Falsiq's managed sandbox rule."""
+
+    path = state_dir / ".gitignore"
+    if path.is_symlink():
+        raise LedgerValidationError(".falsiq/.gitignore must not be a symlink")
+    existed = path.exists()
+    flags = os.O_RDWR | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        file_descriptor = os.open(path, flags, 0o644)
+    except OSError as exc:
+        raise LedgerValidationError(f"could not manage .falsiq/.gitignore: {exc}") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(file_descriptor).st_mode):
+            raise LedgerValidationError(".falsiq/.gitignore must be a regular file")
+        os.lseek(file_descriptor, 0, os.SEEK_SET)
+        chunks: list[bytes] = []
+        while chunk := os.read(file_descriptor, 64 * 1024):
+            chunks.append(chunk)
+        current = b"".join(chunks)
+        if _SANDBOX_IGNORE_ENTRY in current.splitlines():
+            return
+        separator = b"" if not current or current.endswith((b"\n", b"\r")) else b"\n"
+        _write_all(file_descriptor, separator + _SANDBOX_IGNORE_ENTRY + b"\n")
+        os.fsync(file_descriptor)
+    except OSError as exc:
+        raise LedgerValidationError(f"could not manage .falsiq/.gitignore: {exc}") from exc
+    finally:
+        os.close(file_descriptor)
+    if not existed:
+        _fsync_directory(state_dir)
 
 
 def discover_repository(start: str | os.PathLike[str] | None = None) -> Path:
@@ -429,6 +463,7 @@ class Ledger:
         if ledger.state_dir.is_symlink():
             raise LedgerValidationError(".falsiq must not be a symlink")
         ledger.state_dir.mkdir(exist_ok=True)
+        _ensure_sandbox_ignore(ledger.state_dir)
         cases = ledger.state_dir / "cases"
         if cases.is_symlink():
             raise LedgerValidationError(".falsiq/cases must not be a symlink")

@@ -82,3 +82,18 @@ opaque randomized candidate IDs, implementation changes, and visible and hidden
 test results, but never an experimental condition label. Workspace cleanup is
 limited to a dedicated owner-private root carrying a Falsiq marker; unmarked
 directories are never reaped.
+
+## D011: Prototype sandboxes use transient global IDs
+
+A sandbox ID is a canonical ULID but need not identify a durable attack fact:
+prototype candidates can be rendered before selected-only ledger persistence.
+The command therefore allocates an ID when omitted and takes no case selector.
+Selected evidence is copied or linked through the owning case's artifact path.
+Creation is restricted to `.falsiq/sandbox/<id>` and `falsiq/proto/<id>`. Reap
+is global, preserves every failure by default, and requires an explicit
+`--force` before discarding dirty prototype worktrees.
+
+The ignored manifest sidecar lock covers the complete manifest read, Git
+mutation, and durable manifest update. POSIX directory entries are fsynced after
+atomic replacement; Windows retains advisory locking and file flushes while
+directory fsync remains a documented platform no-op.
