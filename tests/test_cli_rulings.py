@@ -205,15 +205,11 @@ def test_multi_target_amend_requires_explicit_active_intent(
     first_output = capsys.readouterr().out.splitlines()
     amended_id = first_output[1]
     amended = next(
-        fact
-        for fact in ledger.read()
-        if isinstance(fact, IntentFact) and fact.id == amended_id
+        fact for fact in ledger.read() if isinstance(fact, IntentFact) and fact.id == amended_id
     )
     inactive_only = add_attack(ledger, amended, targets=[root.id])
     before_inactive = ledger.path.read_bytes()
-    assert main(
-        ["rule", inactive_only.id, "amend", "--text", "Cannot replace inactive root"]
-    ) == 2
+    assert main(["rule", inactive_only.id, "amend", "--text", "Cannot replace inactive root"]) == 2
     inactive_only_output = capsys.readouterr()
     assert "exactly one active attack target" in inactive_only_output.err
     assert ledger.path.read_bytes() == before_inactive
@@ -227,33 +223,39 @@ def test_multi_target_amend_requires_explicit_active_intent(
     assert "--intent" in ambiguous.err
     assert ledger.path.read_bytes() == before
 
-    assert main(
-        [
-            "rule",
-            multi.id,
-            "amend",
-            "--text",
-            "Second amendment",
-            "--intent",
-            root.id,
-        ]
-    ) == 2
+    assert (
+        main(
+            [
+                "rule",
+                multi.id,
+                "amend",
+                "--text",
+                "Second amendment",
+                "--intent",
+                root.id,
+            ]
+        )
+        == 2
+    )
     inactive = capsys.readouterr()
     assert inactive.out == ""
     assert "active attack target" in inactive.err
     assert ledger.path.read_bytes() == before
 
-    assert main(
-        [
-            "rule",
-            multi.id,
-            "amend",
-            "--text",
-            "Second amendment",
-            "--intent",
-            amended.id,
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "rule",
+                multi.id,
+                "amend",
+                "--text",
+                "Second amendment",
+                "--intent",
+                amended.id,
+            ]
+        )
+        == 0
+    )
     success = capsys.readouterr()
     assert success.err == ""
     newest = ledger.read()[-1]
@@ -370,41 +372,45 @@ def test_outcome_enforces_case_and_attack_references(tmp_path: Path, monkeypatch
     monkeypatch.chdir(repo)
     before = ledger.path.read_bytes()
 
-    assert main(
-        [
-            "outcome",
-            "rework",
-            "--case",
-            second.id,
-            "--trace",
-            "elicited",
-            "--attack",
-            first_attack.id,
-        ]
-    ) == 2
+    assert (
+        main(
+            [
+                "outcome",
+                "rework",
+                "--case",
+                second.id,
+                "--trace",
+                "elicited",
+                "--attack",
+                first_attack.id,
+            ]
+        )
+        == 2
+    )
     wrong_case = capsys.readouterr()
     assert "same case" in wrong_case.err
     assert ledger.path.read_bytes() == before
 
-    assert main(
-        [
-            "outcome",
-            "rework",
-            "--case",
-            second.id,
-            "--trace",
-            "elicited",
-            "--attack",
-            new_ulid(),
-        ]
-    ) == 2
+    assert (
+        main(
+            [
+                "outcome",
+                "rework",
+                "--case",
+                second.id,
+                "--trace",
+                "elicited",
+                "--attack",
+                new_ulid(),
+            ]
+        )
+        == 2
+    )
     unknown_attack = capsys.readouterr()
     assert "unknown attack" in unknown_attack.err
     assert ledger.path.read_bytes() == before
 
-    assert main(
-        ["outcome", "accepted", "--case", new_ulid(), "--trace", "n/a"]
-    ) == 2
+    assert main(["outcome", "accepted", "--case", new_ulid(), "--trace", "n/a"]) == 2
     unknown_case = capsys.readouterr()
     assert "unknown case" in unknown_case.err
     assert ledger.path.read_bytes() == before

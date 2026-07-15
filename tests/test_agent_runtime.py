@@ -363,9 +363,12 @@ def test_replay_executable_is_deterministic_and_validates_the_entire_request(
         response=AgentResponse(request_id="request-1", response={"answer": "A"}),
     )
     write_transcript(transcript_path, transcript)
-    encoded_request = json.dumps(
-        transcript.request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-    ) + "\n"
+    encoded_request = (
+        json.dumps(
+            transcript.request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
+        + "\n"
+    )
     replay_command = [
         sys.executable,
         "-m",

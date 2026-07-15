@@ -509,9 +509,7 @@ def prepare_private_directory(path: str | os.PathLike[str]) -> Path:
                     "private transcript directory could not be inspected"
                 ) from exc
         except OSError as exc:
-            raise AgentProtocolError(
-                "private transcript directory could not be inspected"
-            ) from exc
+            raise AgentProtocolError("private transcript directory could not be inspected") from exc
         if stat.S_ISLNK(metadata.st_mode):
             raise AgentProtocolError("private transcript directory must not contain a symlink")
         if not stat.S_ISDIR(metadata.st_mode):
@@ -597,9 +595,7 @@ def _request_subject_ids(request: AgentRequest, subject_kind: str) -> set[str]:
             if field in value:
                 subject_id = value[field]
                 if not isinstance(subject_id, str):
-                    raise LiveExecutionDenied(
-                        "live request payload has an invalid subject ID"
-                    )
+                    raise LiveExecutionDenied("live request payload has an invalid subject ID")
                 found.add(subject_id)
             pending.extend(value.values())
         elif isinstance(value, list):
@@ -614,9 +610,7 @@ def _require_request_subject(
     subject_id: str,
 ) -> None:
     if _request_subject_ids(request, subject_kind) != {subject_id}:
-        raise LiveExecutionDenied(
-            "live request payload must identify only the allowlisted subject"
-        )
+        raise LiveExecutionDenied("live request payload must identify only the allowlisted subject")
 
 
 def _load_allowlist(path: str | os.PathLike[str]) -> LiveAllowlist:
@@ -654,11 +648,7 @@ def authorize_live(
 
     allowlist = _load_allowlist(allowlist_path)
     expected_model = allowlist.models.get(request.role)
-    if (
-        expected_model is None
-        or model_id != expected_model
-        or not _is_fixed_model_id(model_id)
-    ):
+    if expected_model is None or model_id != expected_model or not _is_fixed_model_id(model_id):
         raise LiveExecutionDenied(
             "live execution requires the fixed model authorized for this role"
         )
@@ -760,9 +750,7 @@ def _run_from_args(arguments: argparse.Namespace, request: AgentRequest) -> Agen
     )
     child_environment = os.environ.copy()
     child_environment["FALSIQ_MODEL_ID"] = authorization.model_id
-    child_environment[f"FALSIQ_{authorization.subject_kind.upper()}_ID"] = (
-        authorization.subject_id
-    )
+    child_environment[f"FALSIQ_{authorization.subject_kind.upper()}_ID"] = authorization.subject_id
     return invoke_agent(
         agent_argv,
         request,

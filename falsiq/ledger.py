@@ -219,11 +219,7 @@ def _validate_case_artifact_path(path: str, case_id: str) -> None:
 
 
 def _is_canonical_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and set(value).issubset(_HEX_DIGITS)
-    )
+    return isinstance(value, str) and len(value) == 64 and set(value).issubset(_HEX_DIGITS)
 
 
 def _validate_derivation_commitments(fact: DerivationFact) -> None:
@@ -238,9 +234,7 @@ def _validate_derivation_commitments(fact: DerivationFact) -> None:
     paths = fact.test_stub_paths
     digest_paths = set(fact.test_stub_sha256)
     if len(paths) != len(set(paths)) or set(paths) != digest_paths:
-        raise LedgerValidationError(
-            "derivation test stub paths and digest keys must match exactly"
-        )
+        raise LedgerValidationError("derivation test stub paths and digest keys must match exactly")
     expected_prefix = f"cases/{fact.case_id}/derived/tests/"
     for path in paths:
         filename = path.removeprefix(expected_prefix)
@@ -250,9 +244,7 @@ def _validate_derivation_commitments(fact: DerivationFact) -> None:
                 f"{expected_prefix.removesuffix('/')}: {path}"
             )
         if re.fullmatch(r"test_[a-z0-9_]+\.py", filename) is None:
-            raise LedgerValidationError(
-                f"derivation test stub has an invalid filename: {path}"
-            )
+            raise LedgerValidationError(f"derivation test stub has an invalid filename: {path}")
         if not _is_canonical_sha256(fact.test_stub_sha256[path]):
             raise LedgerValidationError(
                 f"derivation test stub digest is not canonical SHA-256: {path}"

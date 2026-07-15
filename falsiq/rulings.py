@@ -30,16 +30,12 @@ def _active_intent_ids(facts: Sequence[Fact], case_id: str) -> set[str]:
     superseded = {
         fact.supersedes
         for fact in facts
-        if isinstance(fact, IntentFact)
-        and fact.case_id == case_id
-        and fact.supersedes is not None
+        if isinstance(fact, IntentFact) and fact.case_id == case_id and fact.supersedes is not None
     }
     return {
         fact.id
         for fact in facts
-        if isinstance(fact, IntentFact)
-        and fact.case_id == case_id
-        and fact.id not in superseded
+        if isinstance(fact, IntentFact) and fact.case_id == case_id and fact.id not in superseded
     }
 
 
@@ -120,9 +116,7 @@ def build_outcome(
     """Build one outcome after checking its case and optional attack reference."""
 
     case_exists = any(
-        isinstance(fact, IntentFact)
-        and fact.source == "user"
-        and fact.id == case_id
+        isinstance(fact, IntentFact) and fact.source == "user" and fact.id == case_id
         for fact in facts
     )
     if not case_exists:

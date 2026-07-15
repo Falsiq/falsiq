@@ -177,8 +177,7 @@ def test_authorized_live_run_uses_argv_and_passes_the_allowlisted_model_in_env(
 
     assert result.returncode == 0
     assert result.stdout == (
-        '{"request_id":"request-1","response":'
-        '{"model_id":"provider/model-2026-07-15"}}\n'
+        '{"request_id":"request-1","response":{"model_id":"provider/model-2026-07-15"}}\n'
     )
     assert result.stderr == ""
     assert transcript.exists()

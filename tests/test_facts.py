@@ -361,9 +361,7 @@ def test_derivation_paths_are_relative_unique_and_nonempty() -> None:
         brief_path=f"cases/{CASE_ID}/derived/IMPLEMENTATION_BRIEF.md",
         brief_sha256=BRIEF_DIGEST,
         test_stub_paths=[f"cases/{CASE_ID}/derived/tests/test_forbidden.py"],
-        test_stub_sha256={
-            f"cases/{CASE_ID}/derived/tests/test_forbidden.py": STUB_DIGEST
-        },
+        test_stub_sha256={f"cases/{CASE_ID}/derived/tests/test_forbidden.py": STUB_DIGEST},
     )
 
     assert fact.test_stub_paths == [f"cases/{CASE_ID}/derived/tests/test_forbidden.py"]
@@ -393,20 +391,14 @@ def test_derivation_paths_are_relative_unique_and_nonempty() -> None:
             "test_stub_sha256": {},
         },
         {
-            "test_stub_sha256": {
-                f"cases/{CASE_ID}/derived/tests/test_other.py": STUB_DIGEST
-            },
+            "test_stub_sha256": {f"cases/{CASE_ID}/derived/tests/test_other.py": STUB_DIGEST},
         },
         {
-            "test_stub_sha256": {
-                f"cases/{CASE_ID}/derived/tests/test_forbidden.py": "B" * 64
-            },
+            "test_stub_sha256": {f"cases/{CASE_ID}/derived/tests/test_forbidden.py": "B" * 64},
         },
         {
             "test_stub_paths": [f"cases/{CASE_ID}/derived/nested/test_forbidden.py"],
-            "test_stub_sha256": {
-                f"cases/{CASE_ID}/derived/nested/test_forbidden.py": STUB_DIGEST
-            },
+            "test_stub_sha256": {f"cases/{CASE_ID}/derived/nested/test_forbidden.py": STUB_DIGEST},
         },
     ],
 )
@@ -484,9 +476,7 @@ def test_fact_union_round_trips_all_kinds_and_forbids_unknown_fields() -> None:
             render_cost="trivial",
             round=1,
         ),
-        RulingFact(
-            **base_fields(), attack_id=ATTACK_ID, verdict="dont_care", supersedes=RULING_ID
-        ),
+        RulingFact(**base_fields(), attack_id=ATTACK_ID, verdict="dont_care", supersedes=RULING_ID),
         DerivationFact(
             **base_fields(),
             ledger_head=RULING_ID,
@@ -494,9 +484,7 @@ def test_fact_union_round_trips_all_kinds_and_forbids_unknown_fields() -> None:
             brief_sha256=BRIEF_DIGEST,
             test_stub_sha256={},
         ),
-        OutcomeFact(
-            **base_fields(), otype="accepted", trace="n/a", notes="No rework needed."
-        ),
+        OutcomeFact(**base_fields(), otype="accepted", trace="n/a", notes="No rework needed."),
     ]
 
     for fact in facts:

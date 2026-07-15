@@ -270,9 +270,7 @@ class DeriverResponse(StrictDerivationModel):
     def outputs_are_unique(self) -> DeriverResponse:
         ruling_ids = [item.ruling_id for item in self.forbidden_tests]
         filenames = [
-            item.filename.casefold()
-            for item in self.forbidden_tests
-            if item.filename is not None
+            item.filename.casefold() for item in self.forbidden_tests if item.filename is not None
         ]
         if len(ruling_ids) != len(set(ruling_ids)):
             raise ValueError("forbidden test ruling IDs must not contain duplicates")
@@ -280,9 +278,7 @@ class DeriverResponse(StrictDerivationModel):
             raise ValueError(
                 "forbidden test filenames must not contain case-insensitive duplicates"
             )
-        discretion = [
-            (item.decision, item.rationale) for item in self.agent_discretion
-        ]
+        discretion = [(item.decision, item.rationale) for item in self.agent_discretion]
         if len(discretion) != len(set(discretion)):
             raise ValueError("agent discretion entries must not contain duplicates")
         return self
@@ -375,9 +371,7 @@ def validate_deriver_response(
             f"expected {request.ledger_head}, got {response.ledger_head}"
         )
     if response.request_id != request.request_id:
-        raise DerivationError(
-            f"response request ID mismatch: expected {request.request_id}"
-        )
+        raise DerivationError(f"response request ID mismatch: expected {request.request_id}")
 
     expected = {ruling.id for ruling in _forbidden_rulings(facts, case_id)}
     provided = {item.ruling_id for item in response.forbidden_tests}
@@ -460,16 +454,12 @@ def _active_intents(facts: Sequence[Fact], case_id: str) -> list[IntentFact]:
     superseded = {
         fact.supersedes
         for fact in facts
-        if isinstance(fact, IntentFact)
-        and fact.case_id == case_id
-        and fact.supersedes is not None
+        if isinstance(fact, IntentFact) and fact.case_id == case_id and fact.supersedes is not None
     }
     return [
         fact
         for fact in facts
-        if isinstance(fact, IntentFact)
-        and fact.case_id == case_id
-        and fact.id not in superseded
+        if isinstance(fact, IntentFact) and fact.case_id == case_id and fact.id not in superseded
     ]
 
 
@@ -487,9 +477,7 @@ def render_implementation_brief(
     }
     active_rulings = _active_rulings(facts, response.case_id)
     ordered_rulings = [
-        active_rulings[attack_id]
-        for attack_id in attacks
-        if attack_id in active_rulings
+        active_rulings[attack_id] for attack_id in attacks if attack_id in active_rulings
     ]
     lines = [
         "# Implementation brief",
@@ -781,13 +769,10 @@ def submit_derivation(
     stubs = {
         by_ruling[ruling.id].filename: by_ruling[ruling.id].content.encode("utf-8")
         for ruling in forbidden_order
-        if by_ruling[ruling.id].content is not None
-        and by_ruling[ruling.id].filename is not None
+        if by_ruling[ruling.id].content is not None and by_ruling[ruling.id].filename is not None
     }
     brief_relative = f"cases/{response.case_id}/derived/IMPLEMENTATION_BRIEF.md"
-    stub_relatives = [
-        f"cases/{response.case_id}/derived/tests/{filename}" for filename in stubs
-    ]
+    stub_relatives = [f"cases/{response.case_id}/derived/tests/{filename}" for filename in stubs]
     fact = DerivationFact(
         id=id_factory(),
         ts=timestamp_factory(),

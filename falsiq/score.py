@@ -135,8 +135,7 @@ def weighted_conformance(
             raise ValueError(f"unknown latent requirement score: {result.requirement_id}")
         by_id[result.requirement_id] = result.score
     weighted = sum(
-        weights[requirement_id] * by_id.get(requirement_id, 0.0)
-        for requirement_id in weights
+        weights[requirement_id] * by_id.get(requirement_id, 0.0) for requirement_id in weights
     )
     return 100.0 * weighted / denominator
 

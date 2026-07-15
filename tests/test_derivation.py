@@ -105,9 +105,7 @@ def ruled_ledger(repo: Path) -> tuple[Ledger, IntentFact, RulingFact, RulingFact
         attack_id=discretion_attack.id,
         verdict="dont_care",
     )
-    ledger.append_batch(
-        [intent, forbidden_attack, forbidden, discretion_attack, dont_care]
-    )
+    ledger.append_batch([intent, forbidden_attack, forbidden, discretion_attack, dont_care])
     return ledger, intent, forbidden, dont_care
 
 
@@ -140,9 +138,7 @@ def response_for(
 
 def write_response(path: Path, response: DeriverResponse | dict[str, object]) -> Path:
     payload = (
-        response.model_dump(mode="json")
-        if isinstance(response, DeriverResponse)
-        else response
+        response.model_dump(mode="json") if isinstance(response, DeriverResponse) else response
     )
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
@@ -344,18 +340,12 @@ def test_derive_submit_rejects_executable_stub_without_publishing(
     repo = git_repo(tmp_path / "repo")
     ledger, intent, forbidden, _dont_care = ruled_ledger(repo)
     request = build_derivation_request(ledger.read(), intent.case_id)
-    payload = response_for(request, forbidden, reason="Not expressible").model_dump(
-        mode="json"
-    )
+    payload = response_for(request, forbidden, reason="Not expressible").model_dump(mode="json")
     payload["forbidden_tests"] = [
         {
             "ruling_id": forbidden.id,
             "filename": "test_import_time_call.py",
-            "content": (
-                "repository_call()\n"
-                "def test_forbidden_behavior() -> None:\n"
-                "    pass\n"
-            ),
+            "content": ("repository_call()\ndef test_forbidden_behavior() -> None:\n    pass\n"),
             "unexpressible_reason": None,
         }
     ]
@@ -363,9 +353,7 @@ def test_derive_submit_rejects_executable_stub_without_publishing(
     before = ledger.path.read_bytes()
     monkeypatch.chdir(repo)
 
-    assert main(
-        ["derive", "--case", intent.case_id, "--submit", str(response_path)]
-    ) == 2
+    assert main(["derive", "--case", intent.case_id, "--submit", str(response_path)]) == 2
 
     output = capsys.readouterr()
     assert output.out == ""
@@ -393,9 +381,7 @@ def test_deriver_response_rejects_extra_intent_or_duplicate_outputs() -> None:
         content="def test_duplicate() -> None:\n    pass\n",
     )
     with pytest.raises(ValidationError, match="duplicate"):
-        DeriverResponse.model_validate(
-            base | {"forbidden_tests": [duplicate, duplicate]}
-        )
+        DeriverResponse.model_validate(base | {"forbidden_tests": [duplicate, duplicate]})
 
     case_collision = ForbiddenTest.model_construct(
         ruling_id=make_id(4),
@@ -404,9 +390,7 @@ def test_deriver_response_rejects_extra_intent_or_duplicate_outputs() -> None:
         unexpressible_reason=None,
     )
     with pytest.raises(ValidationError, match="case-insensitive"):
-        DeriverResponse.model_validate(
-            base | {"forbidden_tests": [duplicate, case_collision]}
-        )
+        DeriverResponse.model_validate(base | {"forbidden_tests": [duplicate, case_collision]})
 
 
 def test_brief_rendering_is_order_stable_and_intent_section_is_ledger_only(
@@ -632,9 +616,7 @@ def test_derive_submit_materializes_brief_stubs_and_derivation_fact(
     response = response_for(request, forbidden, content=stub_content)
     response_path = write_response(repo / "response.json", response)
 
-    assert main(
-        ["derive", "--case", intent.case_id, "--submit", str(response_path)]
-    ) == 0
+    assert main(["derive", "--case", intent.case_id, "--submit", str(response_path)]) == 0
     output = capsys.readouterr()
     brief_path = repo / ".falsiq" / "cases" / intent.case_id / "derived" / "IMPLEMENTATION_BRIEF.md"
     stub_path = (
@@ -649,9 +631,7 @@ def test_derive_submit_materializes_brief_stubs_and_derivation_fact(
     assert output.err == ""
     assert output.out == f"{brief_path}\n"
     assert request_path.is_file()
-    assert brief_path.read_text() == render_implementation_brief(
-        ledger.read()[:-1], response
-    )
+    assert brief_path.read_text() == render_implementation_brief(ledger.read()[:-1], response)
     assert stub_path.read_text() == stub_content
     derivation = ledger.read()[-1]
     assert isinstance(derivation, DerivationFact)
@@ -702,9 +682,7 @@ def test_submit_rejects_mismatched_response_identity_without_outputs(
     ledger, intent, forbidden, _dont_care = ruled_ledger(repo)
     monkeypatch.chdir(repo)
     request = build_derivation_request(ledger.read(), intent.case_id)
-    response = response_for(request, forbidden, reason="Not expressible").model_dump(
-        mode="json"
-    )
+    response = response_for(request, forbidden, reason="Not expressible").model_dump(mode="json")
     response[mismatch] = "b" * 64 if mismatch == "request_id" else make_id(99)
     path = write_response(repo / "response.json", response)
     before = ledger.path.read_bytes()
@@ -741,18 +719,14 @@ def test_submit_rejects_missing_or_nonforbidden_ruling_entries(
     ):
         payload = base | {"forbidden_tests": entries}
         path = write_response(repo / "response.json", payload)
-        assert main(
-            ["derive", "--case", intent.case_id, "--submit", str(path)]
-        ) == 2
+        assert main(["derive", "--case", intent.case_id, "--submit", str(path)]) == 2
         output = capsys.readouterr()
         assert output.out == ""
         assert "forbidden ruling" in output.err
         assert ledger.path.read_bytes() == before
 
 
-def test_stale_response_is_rejected_before_publication(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_stale_response_is_rejected_before_publication(tmp_path: Path, monkeypatch, capsys) -> None:
     repo = git_repo(tmp_path / "repo")
     ledger, intent, forbidden, _dont_care = ruled_ledger(repo)
     monkeypatch.chdir(repo)
@@ -807,9 +781,7 @@ def test_submit_refuses_symlinked_derived_paths(tmp_path: Path, monkeypatch, cap
     assert list(outside.iterdir()) == []
 
 
-def test_submit_refuses_a_symlinked_derivation_lock(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_submit_refuses_a_symlinked_derivation_lock(tmp_path: Path, monkeypatch, capsys) -> None:
     repo = git_repo(tmp_path / "repo")
     ledger, intent, forbidden, _dont_care = ruled_ledger(repo)
     request = build_derivation_request(ledger.read(), intent.case_id)
@@ -881,9 +853,7 @@ def test_expected_head_race_rolls_back_all_published_outputs(
     assert "ledger head changed" in output.err
     if preexisting:
         assert (derived / "IMPLEMENTATION_BRIEF.md").read_bytes() == old_brief
-        assert [path.name for path in (derived / "tests").iterdir()] == [
-            "test_existing.py"
-        ]
+        assert [path.name for path in (derived / "tests").iterdir()] == ["test_existing.py"]
         assert (derived / "tests" / "test_existing.py").read_bytes() == old_stub
     else:
         assert not (derived / "IMPLEMENTATION_BRIEF.md").exists()
@@ -918,19 +888,13 @@ def test_committed_then_raised_append_keeps_new_outputs_consistent_with_fact(
     output = capsys.readouterr()
     assert output.out == ""
     assert "simulated journal cleanup failure" in output.err
-    derivations = [
-        fact for fact in Ledger.open(repo).read() if isinstance(fact, DerivationFact)
-    ]
+    derivations = [fact for fact in Ledger.open(repo).read() if isinstance(fact, DerivationFact)]
     assert len(derivations) == 1
-    assert (derived / "IMPLEMENTATION_BRIEF.md").read_text().startswith(
-        "# Implementation brief"
-    )
+    assert (derived / "IMPLEMENTATION_BRIEF.md").read_text().startswith("# Implementation brief")
     assert [item.name for item in (derived / "tests").iterdir()] == [
         "test_forbidden_retry_on_4xx.py"
     ]
-    assert (
-        derived / "tests" / "test_forbidden_retry_on_4xx.py"
-    ).read_text() == new_stub
+    assert (derived / "tests" / "test_forbidden_retry_on_4xx.py").read_text() == new_stub
 
 
 def test_unknown_commit_status_keeps_new_disposable_outputs(
@@ -968,18 +932,12 @@ def test_unknown_commit_status_keeps_new_disposable_outputs(
     output = capsys.readouterr()
     assert output.out == ""
     assert "simulated append failure" in output.err
-    assert not any(
-        isinstance(fact, DerivationFact) for fact in original_read(Ledger.open(repo))
-    )
-    assert (derived / "IMPLEMENTATION_BRIEF.md").read_text().startswith(
-        "# Implementation brief"
-    )
+    assert not any(isinstance(fact, DerivationFact) for fact in original_read(Ledger.open(repo)))
+    assert (derived / "IMPLEMENTATION_BRIEF.md").read_text().startswith("# Implementation brief")
     assert [item.name for item in (derived / "tests").iterdir()] == [
         "test_forbidden_retry_on_4xx.py"
     ]
-    assert (
-        derived / "tests" / "test_forbidden_retry_on_4xx.py"
-    ).read_text() == new_stub
+    assert (derived / "tests" / "test_forbidden_retry_on_4xx.py").read_text() == new_stub
     assert {item.name for item in derived.iterdir() if item.name.startswith(".")} == {
         ".derive.lock"
     }
@@ -1025,9 +983,7 @@ def test_concurrent_submissions_cannot_roll_back_a_committed_brief(tmp_path: Pat
                 facts,
                 responses[label],
                 append_batch=append,
-                fact_committed=lambda fact_id: any(
-                    fact.id == fact_id for fact in ledger.read()
-                ),
+                fact_committed=lambda fact_id: any(fact.id == fact_id for fact in ledger.read()),
             )
         except LedgerValidationError:
             return label, False

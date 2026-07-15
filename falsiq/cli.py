@@ -79,9 +79,7 @@ def _render_case(case: dict[str, object]) -> list[str]:
             if not isinstance(age_facts, int):
                 continue
             noun = "fact" if age_facts == 1 else "facts"
-            lines.append(
-                f"Ruling {ruling_id}: {verdict} ({age_facts} later case {noun})"
-            )
+            lines.append(f"Ruling {ruling_id}: {verdict} ({age_facts} later case {noun})")
     lines.append(f"Open attacks: {len(open_attacks) if isinstance(open_attacks, list) else 0}")
     return lines
 
