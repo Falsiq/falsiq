@@ -133,6 +133,21 @@ def test_release_materializes_twenty_dev_and_ten_private_tasks(tmp_path: Path) -
         assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in private_tasks)
 
 
+def test_release_does_not_require_descriptor_chmod(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "approved-source"
+    _write_source(source)
+    monkeypatch.delattr(corpus_module.os, "fchmod")
+
+    plan, public_output, private_output = _materialize(tmp_path, source)
+
+    assert len(plan.holdout_manifest.tasks) == 10
+    assert public_output.is_dir()
+    assert private_output.is_dir()
+
+
 def test_release_requires_every_task_to_be_individually_human_curated(
     tmp_path: Path,
 ) -> None:

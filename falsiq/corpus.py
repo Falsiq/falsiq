@@ -489,6 +489,14 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def _set_descriptor_mode(descriptor: int, mode: int) -> None:
+    """Tighten an open file where descriptor chmod is available."""
+
+    fchmod = getattr(os, "fchmod", None)
+    if fchmod is not None:
+        fchmod(descriptor, mode)
+
+
 def _write_release_tree(
     root: Path,
     *,
@@ -508,7 +516,7 @@ def _write_release_tree(
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(destination, flags, file_mode)
         try:
-            os.fchmod(descriptor, file_mode)
+            _set_descriptor_mode(descriptor, file_mode)
             view = memoryview(payload)
             while view:
                 written = os.write(descriptor, view)
@@ -714,7 +722,7 @@ def _append_access_event(
     try:
         descriptor = os.open(path, flags | nofollow, 0o600)
         try:
-            os.fchmod(descriptor, 0o600)
+            _set_descriptor_mode(descriptor, 0o600)
             view = memoryview(payload)
             while view:
                 written = os.write(descriptor, view)

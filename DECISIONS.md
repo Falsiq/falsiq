@@ -212,3 +212,11 @@ canonical agent prompts remain under `agents/`; byte-equal copies under
 Falsiq source tree. A valid guard proves committed artifact integrity, while
 model-authored test stubs remain untrusted and require complete inspection
 before execution or merge.
+
+## D019: Corpus descriptor modes are portable best effort
+
+POSIX release and access-log files are tightened through `fchmod` and verified
+as owner-only where those mode bits exist. Platforms without descriptor-level
+chmod retain exclusive creation, regular-file and symlink checks, and private
+output separation without calling an unavailable API; their native ACL policy
+remains an operator responsibility.

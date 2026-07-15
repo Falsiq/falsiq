@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import falsiq.corpus as corpus_module
 from falsiq.benchmark import EvalTask
 from falsiq.corpus import (
     CorpusError,
@@ -177,6 +178,38 @@ def test_private_read_verifies_hash_and_logs_access_before_return(tmp_path: Path
         }
     ]
     assert stat.S_IMODE(access_log.stat().st_mode) == 0o600
+
+
+def test_private_access_log_does_not_require_descriptor_chmod(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks = approved_corpus()
+    selected = select_holdout(tasks, seed="seed")
+    salt = b"private salt"
+    manifest = build_holdout_manifest(
+        tasks,
+        corpus_version="v0-approved-1",
+        seed="seed",
+        salt=salt,
+    )
+    store = tmp_path / "private"
+    write_private_tasks(store, selected)
+    access_log = tmp_path / "access.jsonl"
+    monkeypatch.delattr(corpus_module.os, "fchmod")
+
+    loaded = read_private_holdout_task(
+        selected[0].task_id,
+        manifest=manifest,
+        store=store,
+        salt=salt,
+        access_log=access_log,
+        actor="windows-runner",
+        purpose="cross-platform scoring",
+    )
+
+    assert loaded == selected[0]
+    assert access_log.is_file()
 
 
 def test_failed_or_tampered_reads_still_burn_freshness(tmp_path: Path) -> None:
