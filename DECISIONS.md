@@ -323,8 +323,9 @@ The exact standalone message `skip falsiq` remains a special invocation that
 records only a bypass outcome. In particular, an existing `.falsiq/` directory
 never causes automatic review rounds.
 
-All model-facing roles, prompts, transient schemas, commands, and rendered
-artifacts use neutral reviewer and review terminology. Existing durable ledger
+All model-facing roles, prompts, transient schemas, skill commands, and rendered
+artifacts use neutral reviewer and review terminology. The CLI exposes `review`
+as an exact alias for its canonical `attack` command. Existing durable ledger
 facts retain their version-one wire representation so initialized repositories
 remain readable; public state, logs, requests, and CLI arguments translate that
 representation at the boundary.

@@ -119,6 +119,9 @@ Class-specific reviewers receive self-contained requests containing the exact
 prompt, current state, response schema, and valid empty and populated examples.
 Their untrusted output is prepared independently before selection:
 
+`review` is a neutral CLI alias for the canonical `attack` command; both names
+invoke the same subcommands and handlers. The skill always uses `review`.
+
 ```console
 falsiq review request --case CASE_ID --reviewer boundary > boundary-request.json
 falsiq review prepare --case CASE_ID --reviewer boundary \

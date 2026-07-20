@@ -301,7 +301,11 @@ def build_parser() -> argparse.ArgumentParser:
     state_parser.add_argument("--case", dest="case_id")
     state_parser.set_defaults(handler=_state_command)
 
-    review_parser = commands.add_parser("review", help="validate and append review rounds")
+    review_parser = commands.add_parser(
+        "attack",
+        aliases=["review"],
+        help="validate and append review rounds",
+    )
     review_commands = review_parser.add_subparsers(dest="review_command", required=True)
     review_request_parser = review_commands.add_parser(
         "request",

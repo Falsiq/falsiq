@@ -68,6 +68,20 @@ def initialize_case(repo: Path, monkeypatch, capsys) -> str:
     return case_id
 
 
+def test_review_command_is_an_exact_alias_for_attack(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo = git_repo(tmp_path / "repo")
+    case_id = initialize_case(repo, monkeypatch, capsys)
+
+    assert main(["attack", "request", "--case", case_id, "--reviewer", "boundary"]) == 0
+    attack_output = capsys.readouterr()
+    assert attack_output.err == ""
+
+    assert main(["review", "request", "--case", case_id, "--reviewer", "boundary"]) == 0
+    review_output = capsys.readouterr()
+    assert review_output.err == ""
+    assert review_output.out == attack_output.out
+
+
 def test_attack_add_persists_only_selected_facts_and_collide_renders_open_attacks(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
