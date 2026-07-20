@@ -39,7 +39,7 @@ from .facts import (
     utc_timestamp,
 )
 
-AttackClass = Literal["boundary", "consequence", "prototype", "conflict", "omission"]
+ReviewClass = Literal["boundary", "consequence", "prototype", "conflict", "omission"]
 RenderCost = Literal["trivial", "cheap", "expensive"]
 CandidateDigest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
@@ -66,16 +66,16 @@ class StrictTransientModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
 
-class AttackCandidate(StrictTransientModel):
-    """One disposable attack proposal before selector policy is applied."""
+class ReviewCandidate(StrictTransientModel):
+    """One disposable review proposal before selector policy is applied."""
 
     schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
-    klass: AttackClass
+    klass: ReviewClass
     targets: list[Ulid] = Field(min_length=1)
     artifact: Artifact
     settles: list[str] = Field(min_length=1)
     silent_settles: list[str] = Field(default_factory=list)
-    hate_scenario: str
+    risk_scenario: str
     render_cost: RenderCost
 
     @field_validator("targets")
@@ -91,13 +91,13 @@ class AttackCandidate(StrictTransientModel):
             _nonblank(value, field_name="decision")
         return _unique(values, field_name=field_name)
 
-    @field_validator("hate_scenario")
+    @field_validator("risk_scenario")
     @classmethod
-    def hate_scenario_is_concrete(cls, value: str) -> str:
-        return _nonblank(value, field_name="hate_scenario")
+    def risk_scenario_is_concrete(cls, value: str) -> str:
+        return _nonblank(value, field_name="risk_scenario")
 
     @model_validator(mode="after")
-    def silent_decisions_are_also_settled(self) -> AttackCandidate:
+    def silent_decisions_are_also_settled(self) -> ReviewCandidate:
         validate_consequence_artifact(
             klass=self.klass,
             artifact_type=self.artifact.type,
@@ -108,7 +108,7 @@ class AttackCandidate(StrictTransientModel):
         return self
 
 
-def _candidate_artifact_paths(candidate: AttackCandidate) -> tuple[str, ...]:
+def _candidate_artifact_paths(candidate: ReviewCandidate) -> tuple[str, ...]:
     paths: list[str] = []
     if candidate.artifact.path is not None:
         paths.append(candidate.artifact.path)
@@ -116,7 +116,7 @@ def _candidate_artifact_paths(candidate: AttackCandidate) -> tuple[str, ...]:
     return tuple(paths)
 
 
-def _validate_case_paths(case_id: str, candidates: Sequence[AttackCandidate]) -> None:
+def _validate_case_paths(case_id: str, candidates: Sequence[ReviewCandidate]) -> None:
     prefix = f"cases/{case_id}/"
     for candidate in candidates:
         for path in _candidate_artifact_paths(candidate):
@@ -124,23 +124,23 @@ def _validate_case_paths(case_id: str, candidates: Sequence[AttackCandidate]) ->
                 raise ValueError(f"case artifact path must be beneath {prefix}: {path}")
 
 
-class AttackCandidateBatch(StrictTransientModel):
-    """The bounded output contract for one class-specific attacker agent."""
+class ReviewCandidateBatch(StrictTransientModel):
+    """The bounded output contract for one class-specific reviewer agent."""
 
     schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
     case_id: Ulid
-    attacker: AttackClass
-    candidates: list[AttackCandidate] = Field(default_factory=list, max_length=4)
+    reviewer: ReviewClass
+    candidates: list[ReviewCandidate] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
-    def one_attacker_emits_one_class(self) -> AttackCandidateBatch:
-        if any(candidate.klass != self.attacker for candidate in self.candidates):
-            raise ValueError("an attacker must emit only its own class")
+    def one_reviewer_emits_one_class(self) -> ReviewCandidateBatch:
+        if any(candidate.klass != self.reviewer for candidate in self.candidates):
+            raise ValueError("a reviewer must emit only its own class")
         _validate_case_paths(self.case_id, self.candidates)
         return self
 
 
-def _canonical_candidate_bytes(candidate: AttackCandidate) -> bytes:
+def _canonical_candidate_bytes(candidate: ReviewCandidate) -> bytes:
     payload = candidate.model_dump(mode="json")
     return json.dumps(
         payload,
@@ -150,13 +150,13 @@ def _canonical_candidate_bytes(candidate: AttackCandidate) -> bytes:
     ).encode("utf-8")
 
 
-def candidate_digest(candidate: AttackCandidate) -> str:
+def candidate_digest(candidate: ReviewCandidate) -> str:
     """Return the candidate's canonical SHA-256 content identity."""
 
     return hashlib.sha256(_canonical_candidate_bytes(candidate)).hexdigest()
 
 
-def candidate_score(candidate: AttackCandidate) -> Fraction:
+def candidate_score(candidate: ReviewCandidate) -> Fraction:
     """Compute exact constraint/cost score with silent decisions weighted twice."""
 
     constraint = len(candidate.settles) + len(candidate.silent_settles)
@@ -167,7 +167,7 @@ class CandidateRecord(StrictTransientModel):
     """A normalized candidate carrying the digest a selector copies by reference."""
 
     digest: CandidateDigest
-    candidate: AttackCandidate
+    candidate: ReviewCandidate
 
     @model_validator(mode="after")
     def digest_matches_content(self) -> CandidateRecord:
@@ -257,7 +257,7 @@ class SelectionEnvelope(StrictTransientModel):
 def build_selection_envelope(
     case_id: str,
     round_number: int,
-    candidates: Sequence[AttackCandidate],
+    candidates: Sequence[ReviewCandidate],
 ) -> SelectionEnvelope:
     """Normalize candidate output and derive the only policy-valid selection."""
 
@@ -305,26 +305,26 @@ def validate_round_gate(
 
     cases = {attack.case_id for attack in existing_attacks}
     if len(cases) > 1 or (case_id is not None and cases.difference({case_id})):
-        raise RoundGateError("round gate context must contain attacks from one case")
+        raise RoundGateError("round gate context must contain reviews from one case")
     if round_number not in {1, 2}:
-        raise RoundGateError("attack rounds are capped at 2")
+        raise RoundGateError("review rounds are capped at 2")
     if any(attack.round == round_number for attack in existing_attacks):
-        raise RoundGateError(f"attack round {round_number} already exists")
+        raise RoundGateError(f"review round {round_number} already exists")
     if round_number == 1:
         if existing_attacks:
-            raise RoundGateError("round 1 must be the first attack batch")
+            raise RoundGateError("round 1 must be the first review batch")
         return
 
     round_one = [attack for attack in existing_attacks if attack.round == 1]
     if not round_one:
-        raise RoundGateError("round 2 requires round 1 attacks")
+        raise RoundGateError("round 2 requires round 1 reviews")
     open_ids = [attack.id for attack in round_one if attack.id not in active_rulings]
     if open_ids:
         raise RoundGateError("round 1 is still open")
     for attack in round_one:
         ruling = active_rulings[attack.id]
         if ruling.attack_id != attack.id or ruling.case_id != attack.case_id:
-            raise RoundGateError("active ruling does not match its round 1 attack")
+            raise RoundGateError("active ruling does not match its round 1 review")
     if not any(active_rulings[attack.id].verdict in {"amend", "forbidden"} for attack in round_one):
         raise RoundGateError("round 2 requires an amend or forbidden round 1 ruling")
 
@@ -341,12 +341,13 @@ def _materialize_selected(
             ts=timestamp_factory(),
             case_id=envelope.case_id,
             round=envelope.round,
-            **record.candidate.model_dump(mode="python"),
+            hate_scenario=record.candidate.risk_scenario,
+            **record.candidate.model_dump(mode="python", exclude={"risk_scenario"}),
         )
         for record in envelope.selected_records
     )
     if len({fact.id for fact in facts}) != len(facts):
-        raise ValueError("id_factory returned duplicate attack ids")
+        raise ValueError("id_factory returned duplicate review ids")
     return facts
 
 
@@ -359,7 +360,7 @@ def append_attack_round(
     id_factory: Callable[[], str] = new_ulid,
     timestamp_factory: Callable[[], str] = utc_timestamp,
 ) -> tuple[AttackFact, ...]:
-    """Materialize selected attacks and submit them in one atomic ledger call."""
+    """Materialize selected reviews and submit them in one atomic ledger call."""
 
     validate_round_gate(
         envelope.round,
@@ -426,15 +427,15 @@ def render_collision_markdown(case_id: str, attacks: Sequence[AttackFact]) -> st
     """Render one case round in a stable, injection-resistant Markdown format."""
 
     if not attacks:
-        raise ValueError("collision rendering requires at least one attack")
+        raise ValueError("collision rendering requires at least one review")
     if any(attack.case_id != case_id for attack in attacks):
-        raise ValueError("all attacks must belong to the requested case")
+        raise ValueError("all reviews must belong to the requested case")
     rounds = {attack.round for attack in attacks}
     if len(rounds) != 1:
         raise ValueError("a collision file contains exactly one round")
     ids = [attack.id for attack in attacks]
     if len(ids) != len(set(ids)):
-        raise ValueError("collision batch contains a duplicate attack")
+        raise ValueError("collision batch contains a duplicate review")
 
     ordered = sorted(attacks, key=lambda attack: attack.id)
     round_number = next(iter(rounds))
@@ -443,9 +444,9 @@ def render_collision_markdown(case_id: str, attacks: Sequence[AttackFact]) -> st
         "",
         f"- Case: <code>{case_id}</code>",
         f"- Round: {round_number}",
-        f"- Attacks: {len(ordered)}",
+        f"- Reviews: {len(ordered)}",
         "",
-        "Rule every attack with exactly one command shown below.",
+        "Rule every review with exactly one command shown below.",
         "",
     ]
     for position, attack in enumerate(ordered, start=1):
@@ -459,7 +460,7 @@ def render_collision_markdown(case_id: str, attacks: Sequence[AttackFact]) -> st
             ]
         lines.extend(
             [
-                f"## A{position} [{attack.klass}]",
+                f"## R{position} [{attack.klass}]",
                 "",
                 *target_lines,
                 "**Settles**",
@@ -484,7 +485,7 @@ def render_collision_markdown(case_id: str, attacks: Sequence[AttackFact]) -> st
                     lines.extend([_artifact_link(option.path, label="Open choice artifact"), ""])
         lines.extend(
             [
-                "### Hate scenario",
+                "### Risk scenario",
                 "",
                 *_render_body(attack.hate_scenario),
                 "",
@@ -553,8 +554,9 @@ def write_collision_file(
 
 
 __all__ = [
-    "AttackCandidate",
-    "AttackCandidateBatch",
+    "ReviewCandidate",
+    "ReviewCandidateBatch",
+    "ReviewClass",
     "CandidateRecord",
     "RoundGateError",
     "SelectionEnvelope",

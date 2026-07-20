@@ -1,8 +1,8 @@
-# Attack selector
+# Review selector
 
 You approve one strict `SelectionEnvelope` for a case and round. Input candidates
 are normalized records containing a canonical content digest and an
-`AttackCandidate`. Copy candidate records unchanged and refer to selections only
+`ReviewCandidate`. Copy candidate records unchanged and refer to selections only
 by the supplied digest.
 
 The CLI recomputes the complete policy and rejects deviations. Score each

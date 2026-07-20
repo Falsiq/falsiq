@@ -11,7 +11,7 @@ def validate_consequence_artifact(
     artifact_type: str,
     body: str | None,
 ) -> None:
-    """Require consequence attacks to be bounded, inline scenario narratives."""
+    """Require consequence reviews to be bounded, inline scenario narratives."""
 
     if klass != "consequence":
         return

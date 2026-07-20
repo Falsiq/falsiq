@@ -1,7 +1,7 @@
 # Falsiq
 
-Falsiq is an adversarial intent-elicitation layer that runs before a coding
-agent implements a change. It records the user's intent and rulings in an
+Falsiq is a structured intent-review layer that can run before a coding agent
+implements a change. It records the user's intent and rulings in an
 append-only JSONL ledger, then derives disposable implementation briefs from
 that durable record.
 
@@ -33,6 +33,12 @@ maintaining copies under each discovery root. The skill resolves its own
 location as `${SKILL_DIR}` (equal to `${CLAUDE_SKILL_DIR}` under Claude Code),
 so it works unchanged under any host.
 
+Installing or discovering the skill does not activate it. A user must
+explicitly invoke `/falsiq` or include the phrase `with falsiq` in the current
+request. Repository configuration, including an existing `.falsiq/` directory,
+never activates the workflow by itself. The exact standalone message
+`skip falsiq` invokes only the bypass-recording path.
+
 The Python wheel and the agent skill are intentionally separate deliverables.
 The wheel installs the `falsiq` package, its canonical prompt assets, and console
 scripts; it does not place files into a target repository. To use Falsiq
@@ -63,8 +69,8 @@ CLI remains model-free. Each agent is a fresh process that receives exactly one
 JSONL request on standard input and must emit exactly one JSONL response:
 
 ```json
-{"role":"attacker.boundary","request_id":"r1","payload":{"case_id":"c1"}}
-{"request_id":"r1","response":{"attacks":[]}}
+{"role":"reviewer.boundary","request_id":"r1","payload":{"case_id":"c1"}}
+{"request_id":"r1","response":{"reviews":[]}}
 ```
 
 Replay is the normal mode. It requires the incoming request to match the whole
@@ -85,7 +91,7 @@ a differently identified payload:
   "schema_version": 1,
   "task_ids": ["t001"],
   "case_ids": ["01CASE"],
-  "models": {"attacker.boundary": "provider/model-2026-07-15"}
+  "models": {"reviewer.boundary": "provider/model-2026-07-15"}
 }
 ```
 
@@ -107,19 +113,19 @@ Each child stream has an 8 MiB limit. Capture is disk-backed so output cannot
 grow orchestrator memory without bound; crossing either limit kills and waits
 for the child, writes no transcript, and returns only a generic error.
 
-## Attack rounds
+## Review rounds
 
-Class-specific attackers receive self-contained requests containing the exact
+Class-specific reviewers receive self-contained requests containing the exact
 prompt, current state, response schema, and valid empty and populated examples.
 Their untrusted output is prepared independently before selection:
 
 ```console
-falsiq attack request --case CASE_ID --attacker boundary > boundary-request.json
-falsiq attack prepare --case CASE_ID --attacker boundary \
+falsiq review request --case CASE_ID --reviewer boundary > boundary-request.json
+falsiq review prepare --case CASE_ID --reviewer boundary \
   --file boundary-raw.json > boundary.json
 ```
 
-`attack prepare` rejects malformed JSON, duplicate keys, wrong case or role,
+`review prepare` rejects malformed JSON, duplicate keys, wrong case or role,
 extra fields, unsafe files, and all other schema violations. Because zero
 candidates is already a valid semantic result, rejected output becomes that
 role's canonical empty batch with a warning instead of aborting the entire
@@ -127,18 +133,18 @@ round. Valid output is normalized unchanged. After all five roles are prepared,
 append one machine-verified round envelope and render its open collisions:
 
 ```console
-falsiq attack assemble --case CASE_ID --round 1 \
+falsiq review assemble --case CASE_ID --round 1 \
   boundary.json consequence.json prototype.json conflict.json omission.json \
   > selector-round.json
-falsiq attack add -f selector-round.json
+falsiq review add -f selector-round.json
 falsiq collide --case 01ARZ3NDEKTSV4RRFFQ69G5FAV
 ```
 
 The selector envelope contains at most 20 canonical candidate records and up to
 three selected content digests. The CLI recomputes exact scores and composition,
-then appends all selected attacks as one ledger batch. No candidate or free-form
+then appends all selected reviews as one ledger batch. No candidate or free-form
 selection rationale is persisted. Round two is accepted only after every
-round-one attack is ruled and at least one verdict is `amend` or `forbidden`.
+round-one review is ruled and at least one verdict is `amend` or `forbidden`.
 Consequence candidates are rejected unless they contain an inline `scenario`
 narrative of at most 150 whitespace-delimited words.
 
@@ -148,8 +154,8 @@ Record rulings with the exact commands rendered in the collision file. An amend
 prints both the ruling ID and linked amendment-intent ID:
 
 ```console
-falsiq rule ATTACK_ID intended --choice A
-falsiq rule ATTACK_ID amend --text "Reject empty input" --intent INTENT_ID
+falsiq rule REVIEW_ID intended --choice A
+falsiq rule REVIEW_ID amend --text "Reject empty input" --intent INTENT_ID
 ```
 
 `falsiq state` renders each active ruling with its deterministic ledger age: the
@@ -159,7 +165,7 @@ making state output depend on the wall clock.
 Record post-implementation feedback separately:
 
 ```console
-falsiq outcome rework --case CASE_ID --trace elicited --attack ATTACK_ID --notes "..."
+falsiq outcome rework --case CASE_ID --trace elicited --review REVIEW_ID --notes "..."
 falsiq outcome accepted --case CASE_ID --trace n/a
 ```
 
@@ -177,10 +183,10 @@ falsiq sandbox reap
 ```
 
 The optional ID is a canonical ULID allocated with the same generator used for
-facts. It is a transient prototype ID, not proof that a durable attack fact
+facts. It is a transient prototype ID, not proof that a durable review fact
 already exists: prototypes may be rendered before candidate selection. The
 command does not infer or accept a case selector. Evidence chosen for a durable
-attack must be copied or linked through a case-scoped
+review must be copied or linked through a case-scoped
 `cases/<case-id>/...` artifact path before selection is persisted.
 
 Creation uses only `.falsiq/sandbox/<id>` on `falsiq/proto/<id>`. Normal reap
@@ -207,7 +213,7 @@ falsiq derive --case CASE_ID --submit response.json
 
 Requests are stored at
 `.falsiq/cases/<case>/derived/<ledger-head>/request.json`. Submission rejects
-open attacks, stale heads, mismatched request IDs, unsafe or duplicate test
+open reviews, stale heads, mismatched request IDs, unsafe or duplicate test
 names, executable model-authored test content, and incomplete forbidden-ruling
 coverage. Accepted stubs use a deliberately inert grammar: an optional module
 docstring and one or more undecorated, parameterless, synchronous top-level
@@ -221,9 +227,9 @@ pytest-stub set, and appends one derivation fact. Intent and amendment text in t
 brief always comes verbatim from the ledger; response-authored text is confined
 to the clearly labeled test-expressibility section. Agent discretion is derived
 only from the settled decisions of active `dont_care` rulings, with ruling and
-attack provenance; the external deriver cannot add or omit it. Each active
+review provenance; the external deriver cannot add or omit it. Each active
 ruling also carries its ledger-owned artifact, forced-choice meanings, settled
-decisions, and hate scenario into the brief, so a choice such as `A` or `B`
+decisions, and risk scenario into the brief, so a choice such as `A` or `B`
 remains implementable without reopening the collision file.
 
 Each derivation fact commits the SHA-256 digest of the exact brief bytes and an
@@ -279,7 +285,7 @@ and paired bootstrap intervals and retain only per-task numeric conformance.
 The Falsiq builder condition receives a deterministic implementation brief
 rendered only from its public task and elicited collisions. The brief identifies
 the active verbatim intent, preserves amendment history and full ruling evidence
-(artifact, options, settled decisions, hate scenario, verdict, and choice),
+(artifact, options, settled decisions, risk scenario, verdict, and choice),
 turns expressible forbidden choices into acceptance-test obligations, and
 labels `dont_care` decisions as licensed agent discretion. Hidden requirements,
 discriminators, and scorer mappings are never renderer inputs.

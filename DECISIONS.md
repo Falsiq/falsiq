@@ -7,7 +7,7 @@ durable state or runtime behavior ambiguous.
 
 Each root intent opens a case. Every downstream fact carries its `case_id`, and
 case artifacts live below `.falsiq/cases/<case-id>/`. Facts remain in one global
-ledger so conflict attacks can observe prior cases.
+ledger so conflict reviews can observe prior cases.
 
 ## D002: Rival choices are durable
 
@@ -51,11 +51,11 @@ approved subject must also be present in the request payload, and every nested
 occurrence of its `task_id` or `case_id` field must match, so a caller cannot
 authorize unrelated content by changing only the command-line flag.
 
-## D007: Attack selection is machine-verifiable
+## D007: Review selection is machine-verifiable
 
-Attacker batches and selector envelopes are transient. Candidates receive a
+Reviewer batches and selector envelopes are transient. Candidates receive a
 canonical SHA-256 content digest, and the CLI recomputes the exact rational score
-and selected set before appending only the selected attacks. Selection first
+and selected set before appending only the selected reviews. Selection first
 maximizes the valid set size up to three, then total score; equal totals use the
 lexicographically sorted digest set. Selector rationale is derived from these
 inputs rather than accepted as agent-authored durable state.
@@ -76,7 +76,7 @@ evaluation.
 
 An amend ruling and its linked verbatim intent are admitted as one expected-head
 ledger batch. The superseded intent must still be active and must be one of the
-attack's targets. Attacks carrying multiple targets require an explicit
+review's targets. Reviews carrying multiple targets require an explicit
 `--intent`, even when only one target remains active, so historical targets never
 make the amendment choice implicit. Re-rulings automatically supersede the
 active earlier ruling without mutating its record.
@@ -93,7 +93,7 @@ directories are never reaped.
 
 ## D011: Prototype sandboxes use transient global IDs
 
-A sandbox ID is a canonical ULID but need not identify a durable attack fact:
+A sandbox ID is a canonical ULID but need not identify a durable review fact:
 prototype candidates can be rendered before selected-only ledger persistence.
 The command therefore allocates an ID when omitted and takes no case selector.
 Selected evidence is copied or linked through the owning case's artifact path.
@@ -116,10 +116,10 @@ ID hashes the case state, bundled deriver prompt, and response schema. The stric
 response can add only one safe test stub or unexpressible reason per active
 forbidden ruling; intent, ruling, and agent discretion sections are always
 rendered from ledger facts. Every settled decision on an active `dont_care`
-ruling is listed with ruling and attack provenance, and the external deriver
+ruling is listed with ruling and review provenance, and the external deriver
 cannot add or omit discretion. A ruling is not meaningful without its collision,
-so the brief includes the source attack's concrete artifact, option bodies,
-settled decisions, and hate scenario alongside the verdict and choice.
+so the brief includes the source review's concrete artifact, option bodies,
+settled decisions, and risk scenario alongside the verdict and choice.
 
 The current brief and test directory are disposable stable paths beneath the
 case. They are staged and published before an expected-head derivation append;
@@ -150,9 +150,9 @@ state alone, but never a public release that was committed before its private
 counterpart. Existing outputs, symlinks, path aliases, and overlapping roots are
 rejected instead of merged or overwritten.
 
-## D014: Consequences are bounded by every attack contract
+## D014: Consequences are bounded by every review contract
 
-A consequence is useful only as a cheap day-30 narrative. Durable attack facts,
+A consequence is useful only as a cheap day-30 narrative. Durable review facts,
 disposable production candidates, and evaluation candidates therefore share the
 same executable rule: the artifact is an inline `scenario` body of at most 150
 whitespace-delimited words. Path-only or differently typed artifacts are
@@ -207,7 +207,7 @@ missing or mismatched tool. It never uses a target interpreter to import
 Falsiq.
 
 Round request generation, assembly, and handoff guarding therefore live in
-package APIs exposed as `falsiq attack request`, `falsiq attack assemble`, and
+package APIs exposed as `falsiq review request`, `falsiq review assemble`, and
 `falsiq guard`. Historical Python scripts are thin source-checkout compatibility
 wrappers, not production skill dependencies. Canonical production prompts live
 once as package data under `falsiq/prompts/`; requests carry their exact prompt,
@@ -236,15 +236,15 @@ directory is chmodded.
 ## D021: Evaluation builders receive decision-bearing Falsiq handoffs
 
 The end-to-end Falsiq condition is rendered only from the builder-visible
-`PublicTask` and elicited `AttackCandidate`/`PublicRuling` contracts. Hidden
+`PublicTask` and elicited `ReviewCandidate`/`PublicRuling` contracts. Hidden
 requirements, discriminators, scorer mappings, and principal-only metadata are
 not inputs to the renderer. The original request remains verbatim context; in
 the single-intent evaluation protocol, the latest amendment is the active
 verbatim intent and earlier amendments remain clearly labeled superseded
 evidence.
 
-Every active ruling carries its attack class, round, artifact, option meanings,
-settled decisions, hate scenario, verdict, and choice into the builder handoff.
+Every active ruling carries its review class, round, artifact, option meanings,
+settled decisions, risk scenario, verdict, and choice into the builder handoff.
 Forbidden choices create explicit acceptance-test obligations when the visible
 fixture can express them. Decisions settled by `dont_care` are separately
 licensed as agent discretion instead of silently disappearing. This mirrors the
@@ -298,19 +298,33 @@ it invokes only the separately installed `falsiq` console script and never a
 host-specific runtime API, so barriers, round limits, and guard semantics are
 identical across hosts.
 
-## D025: Malformed attacker output degrades only its own role
+## D025: Malformed reviewer output degrades only its own role
 
-An external attacker may honestly return zero candidates, so malformed output
+An external reviewer may honestly return zero candidates, so malformed output
 has no safe semantic repair that is stronger than the same empty contribution.
-Before round assembly, `falsiq attack prepare` reads each untrusted response as
+Before round assembly, `falsiq review prepare` reads each untrusted response as
 a bounded regular non-symlinked file, rejects invalid UTF-8, non-standard JSON,
 duplicate keys, extra fields, wrong case or role, and every Pydantic schema
 violation. A rejection emits a warning and the canonical empty batch for that
 role; it does not abort or alter the other four roles.
 
-This availability fallback never relaxes `attack assemble` or `attack add`.
+This availability fallback never relaxes `review assemble` or `review add`.
 Prepared batches and selection envelopes remain strictly validated, candidates
 are never inferred from malformed bytes, and no partial durable batch is
-appended. Self-contained attacker requests reduce fallback frequency by carrying
+appended. Self-contained reviewer requests reduce fallback frequency by carrying
 the exact response schema and valid empty and populated examples alongside the
 canonical prompt and ledger state.
+
+## D026: Skill activation is explicit and external roles are reviewers
+
+Skill discovery and repository state do not activate Falsiq. The current user
+request must explicitly invoke `/falsiq` or contain the phrase `with falsiq`.
+The exact standalone message `skip falsiq` remains a special invocation that
+records only a bypass outcome. In particular, an existing `.falsiq/` directory
+never causes automatic review rounds.
+
+All model-facing roles, prompts, transient schemas, commands, and rendered
+artifacts use neutral reviewer and review terminology. Existing durable ledger
+facts retain their version-one wire representation so initialized repositories
+remain readable; public state, logs, requests, and CLI arguments translate that
+representation at the boundary.

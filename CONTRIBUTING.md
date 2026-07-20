@@ -38,7 +38,7 @@ operator workflow changes. Keep implementation, tests, prompts, skill material,
 and evaluation contracts in the same logical change.
 
 The current v0 implements deterministic ledger plumbing, external-agent
-protocols, attack selection, ruling and derivation handoffs, prototype
+protocols, review selection, ruling and derivation handoffs, prototype
 sandboxes, replay-first evaluation, corpus release controls, and the agent
 skill workflow for Claude Code, Cursor, Codex, and generic skill-aware hosts. It does **not** include a bundled provider adapter, invoke a language
 model from the `falsiq` CLI, contain an approved held-out corpus, or establish
@@ -54,9 +54,9 @@ agent or model.
 ```text
 verbatim request
     -> intent fact / case
-    -> five external attacker batches (transient)
+    -> five external reviewer batches (transient)
     -> deterministic selection
-    -> selected attack facts + collision artifact
+    -> selected review facts + collision artifact
     -> explicit human rulings
     -> head-bound derivation request
     -> external deriver response (untrusted)
@@ -67,18 +67,18 @@ verbatim request
 ```
 
 `falsiq init` discovers the target Git root and creates `.falsiq/`. One global
-canonical JSONL ledger holds all cases so conflict attacks can observe prior
+canonical JSONL ledger holds all cases so conflict reviews can observe prior
 decisions. A root intent's ULID is also its case ID; case-scoped artifacts live
 under `.falsiq/cases/<case-id>/`. Facts are never updated or deleted. Amendments
 and re-rulings append new facts that supersede older ones, and current state is
 derived by replaying the complete validated sequence.
 
-Attacker requests and selection envelopes are disposable protocol values. The
+Reviewer requests and selection envelopes are disposable protocol values. The
 installed CLI emits each request with its canonical prompt, relevant state,
 exact response schema, and valid examples. It normalizes valid responses and
 turns malformed output into only that role's canonical empty batch, then reads
-exactly one prepared batch for each attack class, computes canonical content
-digests and rational scores, and persists only the selected attacks as an
+exactly one prepared batch for each review class, computes canonical content
+digests and rational scores, and persists only the selected reviews as an
 expected-head batch. Collision Markdown renders the ledger-owned artifacts as
 forced choices. Only explicit human rulings may cross the next boundary; no
 agent may infer or auto-submit one.
@@ -103,17 +103,17 @@ payload, and a non-CI environment. The evaluation runner itself is replay-only.
 
 | Path | Responsibility |
 | --- | --- |
-| `falsiq/cli.py` | `argparse` plumbing for ledger, attack, ruling, derivation, guard, outcome, and sandbox commands |
+| `falsiq/cli.py` | `argparse` plumbing for ledger, review, ruling, derivation, guard, outcome, and sandbox commands |
 | `falsiq/facts.py` | Strict Pydantic v2 schemas for append-only durable facts, ULIDs, timestamps, and safe artifact paths |
 | `falsiq/ledger.py` | Git-root discovery, initialization, canonical JSONL validation, crash-recoverable atomic appends, expected-head concurrency, supersession, and derived state |
 | `falsiq/constraints.py` | Limits shared across durable, transient, and evaluation contracts |
-| `falsiq/attacks.py` | Transient attack schemas, content identities, deterministic selection, round gates, durable materialization, and collision rendering |
+| `falsiq/attacks.py` | Transient review schemas, content identities, deterministic selection, round gates, durable materialization, and collision rendering |
 | `falsiq/rulings.py` | Deterministic ruling, amendment, re-ruling, and outcome batches |
 | `falsiq/derive.py` | Head-bound request construction, deriver-response validation, inert scaffold grammar, brief rendering, publication, digest commitments, locking, and rollback |
-| `falsiq/workflow.py` | Installed-skill helpers behind attacker request/preparation/assembly and `falsiq guard` |
+| `falsiq/workflow.py` | Installed-skill helpers behind reviewer request/preparation/assembly and `falsiq guard` |
 | `falsiq/sandbox.py` | Manifest-owned disposable Git worktrees and conservative cleanup |
 | `falsiq/agent_runtime.py` | Provider-neutral executable-agent protocol, exact replay, bounded process capture, private transcripts, and live authorization |
-| `falsiq/prompts/` | Single packaged source for production attacker and deriver prompts |
+| `falsiq/prompts/` | Single packaged source for production reviewer and deriver prompts |
 | `falsiq/benchmark.py` | Versioned hidden-intent task contracts, salted task identity, and principal leakage checks |
 | `falsiq/corpus.py` | Human-approval gates, deterministic holdout selection, redacted manifests, private-first release, access logging, and verified private reads |
 | `falsiq/score.py` | Pure recall, waste, discretion, conformance, and paired-bootstrap calculations |
@@ -210,7 +210,7 @@ distribution metadata, not tests, evaluation-only prompts, evaluation corpora,
 - Schema or state changes belong in `test_facts.py` and `test_ledger.py`, with
   malformed sequences, supersession, deterministic state, and no-write failure
   cases.
-- Attack changes belong in `test_attacks.py` plus the CLI attack tests. Cover
+- Review changes belong in `test_attacks.py` plus the CLI review tests. Cover
   canonical identity, exact selection, diversity, budget gates, artifact path
   containment, and collision output. Update golden files only for intentional
   rendering changes.
@@ -270,11 +270,11 @@ Treat these as review blockers:
   persisted as a second source of truth.
 - User intent and amendment text remain verbatim. Falsiq never silently rewrites
   them and never creates a human ruling.
-- Only selected attacks become facts. Attacks require concrete artifacts,
-  non-empty settled decisions, and a hate scenario. Consequences are inline
+- Only selected reviews become facts. Reviews require concrete artifacts,
+  non-empty settled decisions, and a risk scenario. Consequences are inline
   scenarios of at most 150 whitespace-delimited words.
 - Round and interaction limits are executable policy. The skill runs exactly
-  five fresh class-specific attackers in parallel per attempted round, stops for
+  five fresh class-specific reviewers in parallel per attempted round, stops for
   explicit human rulings, and never runs a third round.
 - Durable and derived paths remain case-scoped, relative, regular, and
   non-symlinked where required. Never weaken containment to make a fixture pass.
@@ -311,7 +311,7 @@ platforms that cannot provide them.
 Prompt and workflow files are executable contracts, not informal prose.
 
 - Canonical production prompts live only in `falsiq/prompts/` and ship as package
-  data. `falsiq attack request` combines them with the Pydantic-generated schema
+  data. `falsiq review request` combines them with the Pydantic-generated schema
   and role-bound examples; the derivation request embeds its prompt and schema.
   Do not add mirrors under `agents/` or `skill/`. Run `tests/test_skill.py` and
   `tests/test_derivation.py` after prompt changes.
@@ -349,7 +349,7 @@ Prompt and workflow files are executable contracts, not informal prose.
 
 Useful focused contributions include stronger ledger recovery and cross-platform
 durability tests; clearer collision rendering without weakening forced choices;
-new attack-quality fixtures; sandbox containment and portability; stricter
+new review-quality fixtures; sandbox containment and portability; stricter
 derivation and guard validation; replay protocol hardening; evaluation leakage
 tests; deterministic metrics; corpus review and release tooling; and skill
 portability or documentation fixes.

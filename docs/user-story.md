@@ -13,9 +13,9 @@ This guide describes the current `0.1.0` workflow. The
 
 | Participant | What it does | What it does not do |
 | --- | --- | --- |
-| Human | States the change, reacts to concrete collisions, and explicitly rules each selected attack. | Does not need to author candidate JSON or maintain a specification document. |
-| External coding-agent skill | Inspects the target repository, runs five fresh attacker agents in parallel, presents collisions, stops for human rulings, calls an external deriver, and implements only after handoff. | Must not invent a ruling, auto-select a human preference, or edit the target before the guard passes. |
-| `falsiq` CLI | Deterministically validates, selects, records, renders, derives state, verifies artifacts, and manages prototype worktrees. | Never calls a model and does not generate attacker or deriver responses on its own. |
+| Human | States the change, reacts to concrete collisions, and explicitly rules each selected review. | Does not need to author candidate JSON or maintain a specification document. |
+| External coding-agent skill | Inspects the target repository, runs five fresh reviewer agents in parallel, presents collisions, stops for human rulings, calls an external deriver, and implements only after handoff. | Must not invent a ruling, auto-select a human preference, or edit the target before the guard passes. |
+| `falsiq` CLI | Deterministically validates, selects, records, renders, derives state, verifies artifacts, and manages prototype worktrees. | Never calls a model and does not generate reviewer or deriver responses on its own. |
 
 Installing only the CLI therefore provides plumbing, not autonomous intent
 elicitation. A normal interactive workflow also needs the external skill and
@@ -64,11 +64,11 @@ Initialization creates `.falsiq/ledger.jsonl` and manages
 runtime sidecars. Sandbox data, locks, transaction journals, and derivation
 locks are ignored.
 
-Explicit `/falsiq` invocation may perform this initialization when no ledger
-exists. Once `.falsiq/` exists, the skill is instructed to activate before a
-nontrivial feature, bug fix, refactor, migration, dependency, schema,
-configuration, API, or other behavior-changing edit. It does not activate for
-a read-only explanation or a purely cosmetic typo unless explicitly invoked.
+Discovery and initialization do not activate the skill. A request opts in only
+when it explicitly invokes `/falsiq` or contains the phrase `with falsiq`, for
+example `Add bounded retries with falsiq`. An existing `.falsiq/` directory
+never activates the workflow by itself. The exact standalone message
+`skip falsiq` invokes only the bypass-recording path.
 
 ## Story 2: take a change from request to implementation
 
@@ -78,7 +78,8 @@ a read-only explanation or a purely cosmetic typo unless explicitly invoked.
 Suppose the user asks:
 
 ```text
-Add bounded retries to the request helper without delaying ordinary failures.
+Add bounded retries to the request helper without delaying ordinary failures,
+with falsiq.
 ```
 
 ### 1. Intake preserves the request
@@ -98,14 +99,14 @@ instead of appending a duplicate root intent.
 Useful inspection commands are:
 
 ```console
-$ falsiq state --json --case "$CASE"  # active intent, rulings, open attacks
-$ falsiq state --json                 # all cases, used by the conflict attacker
+$ falsiq state --json --case "$CASE"  # active intent, rulings, open reviews
+$ falsiq state --json                 # all cases, used by the conflict reviewer
 $ falsiq log --case "$CASE"           # canonical durable facts for this case
 ```
 
-### 2. External attackers propose; the CLI selects
+### 2. External reviewers propose; the CLI selects
 
-The external skill first asks the CLI for one self-contained request per attack
+The external skill first asks the CLI for one self-contained request per review
 class. Each request contains the canonical role prompt, relevant ledger state,
 the exact response schema, and valid empty and populated examples. Boundary,
 consequence, prototype, and omission receive case state; conflict receives
@@ -117,34 +118,34 @@ worktree.
 The commands below are normally issued by the skill, not typed by the user:
 
 ```console
-$ falsiq attack request --case "$CASE" --attacker boundary \
+$ falsiq review request --case "$CASE" --reviewer boundary \
     > "$TMP/boundary-request.json"
-$ falsiq attack prepare --case "$CASE" --attacker boundary \
+$ falsiq review prepare --case "$CASE" --reviewer boundary \
     --file "$TMP/boundary-raw.json" > "$TMP/boundary.json"
 # Repeat request and prepare for consequence, prototype, conflict, and omission.
-$ falsiq attack assemble --case "$CASE" --round 1 \
+$ falsiq review assemble --case "$CASE" --round 1 \
     "$TMP/boundary.json" "$TMP/consequence.json" \
     "$TMP/prototype.json" "$TMP/conflict.json" \
     "$TMP/omission.json" > "$TMP/round.json"
-$ falsiq attack add --file "$TMP/round.json"
+$ falsiq review add --file "$TMP/round.json"
 ```
 
-`attack prepare` validates one role's output as strict JSON with no duplicate
+`review prepare` validates one role's output as strict JSON with no duplicate
 keys, checks the case and class, and normalizes valid output. Invalid output is
 replaced by only that role's canonical empty batch with a warning; because a
-role may honestly find zero attacks, fabricating a repair would add less safety
+role may honestly find zero reviews, fabricating a repair would add less safety
 than this explicit degradation. The remaining roles and round continue.
 
-`attack assemble` requires one prepared batch from every class, normalizes the
+`review assemble` requires one prepared batch from every class, normalizes the
 candidates, and computes the only policy-valid selection. It can select up to
-three candidates and recomputes the selection when `attack add` validates the
+three candidates and recomputes the selection when `review add` validates the
 envelope. Editing the `selected` array or substituting an agent's preference is
-rejected. Only selected attacks become ledger facts; raw batches, prepared
+rejected. Only selected reviews become ledger facts; raw batches, prepared
 batches, and the round envelope remain disposable.
 
 ### 3. A collision creates a real human stop
 
-When selection is nonempty, the skill renders the open attacks:
+When selection is nonempty, the skill renders the open reviews:
 
 ```console
 $ COLLISION=$(falsiq collide --case "$CASE")
@@ -156,13 +157,13 @@ The command prints a path such as:
 /absolute/path/to/target/.falsiq/cases/<case-id>/collisions/1.md
 ```
 
-The file contains each concrete artifact, the decisions it settles, the hate
+The file contains each concrete artifact, the decisions it settles, the risk
 scenario, any forced-choice meanings, and the exact legal ruling commands. The
 skill reads and presents the complete file, then emits exactly:
 
 ```text
 STOP -- HUMAN RULING REQUIRED
-No implementation has started. Reply with an explicit ruling for every displayed attack.
+No implementation has started. Reply with an explicit ruling for every displayed review.
 ```
 
 That message ends the agent turn. Derivation, tests, and implementation do not
@@ -175,17 +176,17 @@ statements to the commands printed in the collision. Depending on the artifact,
 legal commands look like:
 
 ```console
-$ falsiq rule ATTACK_ID intended --choice A
-$ falsiq rule ATTACK_ID forbidden --choice B
-$ falsiq rule ATTACK_ID dont_care
-$ falsiq rule ATTACK_ID amend --text "Retry only idempotent methods."
+$ falsiq rule REVIEW_ID intended --choice A
+$ falsiq rule REVIEW_ID forbidden --choice B
+$ falsiq rule REVIEW_ID dont_care
+$ falsiq rule REVIEW_ID amend --text "Retry only idempotent methods."
 ```
 
-For an attack targeting more than one active intent, an amendment also needs
+For a review targeting more than one active intent, an amendment also needs
 the target shown by the collision:
 
 ```console
-$ falsiq rule ATTACK_ID amend \
+$ falsiq rule REVIEW_ID amend \
     --text "Retry only idempotent methods." --intent INTENT_ID
 ```
 
@@ -199,18 +200,18 @@ The verdicts mean:
 - `amend`: the exact amendment text becomes a linked intent fact.
 
 An omitted or ambiguous response produces no ruling. The skill checks state,
-re-renders only unresolved attacks, repeats the stop barrier, and ends the turn
+re-renders only unresolved reviews, repeats the stop barrier, and ends the turn
 again. A later explicit change of mind appends a superseding ruling rather than
 editing the earlier fact.
 
-After all round-one attacks are ruled, round two occurs only when at least one
-active verdict is `amend` or `forbidden`. It uses five new attackers in
+After all round-one reviews are ruled, round two occurs only when at least one
+active verdict is `amend` or `forbidden`. It uses five new reviewers in
 parallel against the updated state. All-`intended`/`dont_care` rulings proceed
 directly to derivation. No case gets a third round.
 
 ### 5. An external deriver proposes; the CLI publishes
 
-With no open attacks, the CLI emits a canonical derivation request:
+With no open reviews, the CLI emits a canonical derivation request:
 
 ```console
 $ REQUEST_PATH=$(falsiq derive --case "$CASE")
@@ -261,8 +262,8 @@ Immediately before the first implementation edit, the skill runs:
 $ BRIEF=$(falsiq guard --case "$CASE")
 ```
 
-The guard requires no open attacks, a derivation newer than the case's latest
-intent/attack/ruling, a regular non-symlinked brief, and an exact committed set
+The guard requires no open reviews, a derivation newer than the case's latest
+intent/review/ruling, a regular non-symlinked brief, and an exact committed set
 of derived scaffolds. It verifies SHA-256 commitments and rejects missing,
 edited, symlinked, or extra artifacts.
 
@@ -291,11 +292,11 @@ $ falsiq outcome accepted --case "$CASE" --trace n/a \
 If implementation needs rework, classify why:
 
 ```console
-# The selected attack exposed this requirement; --attack is required.
+# The selected review exposed this requirement; --review is required.
 $ falsiq outcome rework --case "$CASE" --trace elicited \
-    --attack ATTACK_ID --notes "The forbidden behavior reappeared."
+    --review REVIEW_ID --notes "The forbidden behavior reappeared."
 
-# An existing attack class could reasonably have exposed it, but none did.
+# An existing review class could reasonably have exposed it, but none did.
 $ falsiq outcome rework --case "$CASE" --trace missable \
     --notes "The empty-state decision was never surfaced."
 
@@ -304,8 +305,8 @@ $ falsiq outcome rework --case "$CASE" --trace novel \
     --notes "A newly discovered platform limitation changed the solution."
 ```
 
-`accepted` and `abandoned` require `--trace n/a` and no attack reference.
-Only `elicited` rework accepts and requires `--attack`.
+`accepted` and `abandoned` require `--trace n/a` and no review reference.
+Only `elicited` rework accepts and requires `--review`.
 
 ## Story 3: explicitly bypass the barrier
 
@@ -334,21 +335,21 @@ or rewrite its intent.
 
 ## Story 4: an already precise request produces no collision
 
-> As the user, I do not want ceremony when five independent attackers find no
+> As the user, I do not want ceremony when five independent reviewers find no
 > honest ambiguity.
 
-All five attacker agents still return their bounded batches. If the canonical
+All five reviewer agents still return their bounded batches. If the canonical
 round contains no candidates, assembly produces an empty selection:
 
 ```console
-$ falsiq attack assemble --case "$CASE" --round 1 \
+$ falsiq review assemble --case "$CASE" --round 1 \
     "$TMP/boundary.json" "$TMP/consequence.json" \
     "$TMP/prototype.json" "$TMP/conflict.json" \
     "$TMP/omission.json" > "$TMP/round.json"
 {"candidates":[],"selected":[],...}
 ```
 
-The skill does not call `attack add` or `collide`, so no empty attack fact or
+The skill does not call `review add` or `collide`, so no empty review fact or
 human stop is manufactured. It proceeds to the external derivation and guard
 handoff. This is the normal degenerate path, not an error.
 
@@ -357,17 +358,17 @@ handoff. This is the normal degenerate path, not an error.
 > As a user facing two plausible observable behaviors, I want to see a small
 > comparison without turning the prototype into implementation work.
 
-The prototype attacker may make at most one one-shot attempt in a Falsiq-owned
+The prototype reviewer may make at most one one-shot attempt in a Falsiq-owned
 Git worktree. After initialization, the skill can request one with an optional
 canonical transient ID:
 
 ```console
 $ falsiq sandbox new
-{"attack_id":"<id>","branch":"falsiq/proto/<id>","path":".falsiq/sandbox/<id>"}
+{"review_id":"<id>","branch":"falsiq/proto/<id>","path":".falsiq/sandbox/<id>"}
 ```
 
 The sandbox is created at `.falsiq/sandbox/<id>` on branch
-`falsiq/proto/<id>`. It is not proof that an attack with that ID was selected.
+`falsiq/proto/<id>`. It is not proof that a review with that ID was selected.
 The sandbox has no Falsiq merge or push operation and must not become a second
 development environment.
 
@@ -420,18 +421,18 @@ Concrete examples:
 | --- | --- |
 | “Add retry logic to the HTTP helper.” | Useful: status classes, exception types, method safety, attempt limits, and delay policy can produce materially different behavior. |
 | “Migrate stored sessions to the new schema without downtime.” | Useful: compatibility, partial failure, rollback, concurrency, and old-reader behavior deserve concrete collisions. |
-| “Rename this CLI flag but keep existing automation working.” | Useful: a conflict attacker can compare compatibility expectations with current tests and earlier rulings. |
+| “Rename this CLI flag but keep existing automation working.” | Useful: a conflict reviewer can compare compatibility expectations with current tests and earlier rulings. |
 | “Show me compact and verbose output before we choose one.” | Useful: a one-shot prototype can render the rival observable behaviors without becoming production code. |
 | “Explain how the parser handles empty input.” | Usually not useful: this is a read-only explanation, so the agent should inspect and report rather than open an intent case. |
 | “Run the tests and summarize the failures.” | Usually not useful: this is read-only diagnosis, not authorization to change behavior. |
 | “Fix `recieve` to `receive` in the comment.” | Usually not useful: this is a purely cosmetic correction unless the user explicitly invokes Falsiq. |
-| “Implement exactly this supplied input/output table.” | Falsiq still runs for a nontrivial change in an enabled repository, but honest attackers may return no candidates and take the degenerate path. |
+| “Implement exactly this supplied input/output table with falsiq.” | The explicit invocation runs Falsiq, but honest reviewers may return no candidates and take the degenerate path. |
 
 ## Artifact map
 
 | Artifact | Purpose | Durable? |
 | --- | --- | --- |
-| `.falsiq/ledger.jsonl` | Canonical append-only intent, attack, ruling, derivation, and outcome facts. | Yes |
+| `.falsiq/ledger.jsonl` | Canonical append-only intent, review, ruling, derivation, and outcome facts. | Yes |
 | Private `$TMP/*.json` | Raw candidate batches, selection envelope, and external deriver response. | No; kept outside the worktree and deleted after handoff or failure |
 | `.falsiq/cases/<case>/collisions/<round>.md` | Complete forced-choice collision and legal commands for the currently open round. | Derived case artifact; the ledger remains canonical |
 | `.falsiq/cases/<case>/derived/<head>/request.json` | Canonical request bound to one ledger head and response schema. | Derived request artifact; the ledger remains canonical |
@@ -449,12 +450,12 @@ around the barrier.
 | `STOP -- FALSIQ CLI REQUIRED`, `CLI UNUSABLE`, or `CLI VERSION MISMATCH` | Install or repair the declared compatible tool outside the target project, then rerun the prerequisite. The skill must not do this silently. |
 | `not inside a Git repository` | Move into the intended Git worktree or initialize Git before running Falsiq. |
 | Ledger not initialized | Run `falsiq init` once in the target. Do not create ledger files by hand. |
-| Malformed attacker output, wrong case or role, duplicate keys, or unsafe response file | `attack prepare` warns and emits that role's canonical empty batch. Continue the round with the other four prepared batches; never fabricate a candidate. |
-| Duplicate prepared class, missing prepared batch, or edited selection | Discard the temporary round and regenerate its deterministic inputs. No partial attack batch should be appended. |
-| `STOP -- HUMAN RULING REQUIRED` from the guard | One or more attacks remain open. Inspect `falsiq state --json --case "$CASE"`, present the unresolved collision, and wait for explicit rulings. |
+| Malformed reviewer output, wrong case or role, duplicate keys, or unsafe response file | `review prepare` warns and emits that role's canonical empty batch. Continue the round with the other four prepared batches; never fabricate a candidate. |
+| Duplicate prepared class, missing prepared batch, or edited selection | Discard the temporary round and regenerate its deterministic inputs. No partial review batch should be appended. |
+| `STOP -- HUMAN RULING REQUIRED` from the guard | One or more reviews remain open. Inspect `falsiq state --json --case "$CASE"`, present the unresolved collision, and wait for explicit rulings. |
 | Round two is rejected | Round one is missing, still open, already duplicated, or lacks an active `amend`/`forbidden` verdict. Follow the state-derived gate; do not force a round. |
-| Derivation request or response is rejected | Resolve open attacks or ask a fresh external deriver to copy the request identity exactly and return only the allowed schema. Never weaken validation or hand-edit the request. |
-| Guard reports no current derivation | Intent, attacks, or rulings changed after derivation, or no response was submitted. Emit a new request, obtain a fresh response, and submit again. |
+| Derivation request or response is rejected | Resolve open reviews or ask a fresh external deriver to copy the request identity exactly and return only the allowed schema. Never weaken validation or hand-edit the request. |
+| Guard reports no current derivation | Intent, reviews, or rulings changed after derivation, or no response was submitted. Emit a new request, obtain a fresh response, and submit again. |
 | Guard reports missing, symlinked, edited, digest-mismatched, or extra derived artifacts | Treat the derived tree as disposable and regenerate it through `falsiq derive`; do not patch the brief or scaffolds manually. |
 | `sandbox reap` reports a dirty prototype | Inspect it and preserve selected evidence first. Use `--force` only when discarding those changes is intentional. |
 | Ledger integrity error | Stop and involve the repository operator. Do not delete, rewrite, or skip malformed durable facts. |
@@ -469,4 +470,4 @@ $ falsiq log --kind ruling --case "$CASE"
 ```
 
 These commands do not ask an agent to reinterpret the ledger. They expose the
-facts and current state that every external attacker and deriver must respect.
+facts and current state that every external reviewer and deriver must respect.

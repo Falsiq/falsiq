@@ -8,8 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 from falsiq.attacks import (
-    AttackCandidate,
-    AttackCandidateBatch,
+    ReviewCandidate,
+    ReviewCandidateBatch,
     RoundGateError,
     SelectionEnvelope,
     append_attack_round,
@@ -48,9 +48,9 @@ def candidate(
     silent: int = 0,
     cost: str = "trivial",
     artifact: Artifact | None = None,
-) -> AttackCandidate:
+) -> ReviewCandidate:
     decisions = [f"{name}-decision-{index}" for index in range(settles)]
-    return AttackCandidate(
+    return ReviewCandidate(
         klass=klass,
         targets=[INTENT_ID],
         artifact=artifact
@@ -60,7 +60,7 @@ def candidate(
         ),
         settles=decisions,
         silent_settles=decisions[:silent],
-        hate_scenario=f"The {name} behavior silently loses user work.",
+        risk_scenario=f"The {name} behavior silently loses user work.",
         render_cost=cost,
     )
 
@@ -104,9 +104,9 @@ def ruling(index: int, attack: AttackFact, verdict: str) -> RulingFact:
 
 def test_candidate_batches_are_strict_class_scoped_agent_output() -> None:
     item = candidate("edge")
-    batch = AttackCandidateBatch(
+    batch = ReviewCandidateBatch(
         case_id=CASE_ID,
-        attacker="boundary",
+        reviewer="boundary",
         candidates=[item],
     )
 
@@ -114,24 +114,24 @@ def test_candidate_batches_are_strict_class_scoped_agent_output() -> None:
     assert batch.candidates == [item]
 
     with pytest.raises(ValidationError, match="must emit only its own class"):
-        AttackCandidateBatch(
+        ReviewCandidateBatch(
             case_id=CASE_ID,
-            attacker="consequence",
+            reviewer="consequence",
             candidates=[item],
         )
     with pytest.raises(ValidationError):
-        AttackCandidateBatch.model_validate(
+        ReviewCandidateBatch.model_validate(
             {
                 "case_id": CASE_ID,
-                "attacker": "boundary",
+                "reviewer": "boundary",
                 "candidates": [item.model_dump(mode="json")],
                 "commentary": "not part of the contract",
             }
         )
     with pytest.raises(ValidationError):
-        AttackCandidateBatch(
+        ReviewCandidateBatch(
             case_id=CASE_ID,
-            attacker="boundary",
+            reviewer="boundary",
             candidates=[candidate(str(index)) for index in range(5)],
         )
 
@@ -156,7 +156,7 @@ def test_consequence_candidates_enforce_the_narrative_budget(artifact: Artifact)
         {"settles": [" "]},
         {"settles": ["same", "same"]},
         {"settles": ["one"], "silent_settles": ["other"]},
-        {"hate_scenario": ""},
+        {"risk_scenario": ""},
         {"targets": []},
         {"extra": "forbidden"},
     ],
@@ -168,7 +168,7 @@ def test_transient_candidates_reject_attack_theater_and_lossy_data(
     payload.update(updates)
 
     with pytest.raises(ValidationError):
-        AttackCandidate.model_validate(payload)
+        ReviewCandidate.model_validate(payload)
 
 
 def test_candidate_score_uses_exact_silent_decision_weighting() -> None:
@@ -196,8 +196,8 @@ def test_candidate_digest_is_canonical_content_identity() -> None:
     payload = candidate("digest", settles=2, silent=1, cost="expensive").model_dump(mode="json")
     reordered = json.loads(json.dumps(payload, sort_keys=False))
 
-    assert candidate_digest(AttackCandidate.model_validate(reordered)) == (
-        "94f4e76dac12ea2bd6ab6d8c62d647f431ce96f0bfca11ae61cb50565ad99d2e"
+    assert candidate_digest(ReviewCandidate.model_validate(reordered)) == (
+        "cadd998b5752448440d38aab145be51ce1781972569eb45cc5a5eecccbbedbc7"
     )
 
 
@@ -316,9 +316,9 @@ def test_candidate_envelopes_reject_artifact_paths_outside_the_case() -> None:
     )
 
     with pytest.raises(ValidationError, match="case artifact path"):
-        AttackCandidateBatch(
+        ReviewCandidateBatch(
             case_id=CASE_ID,
-            attacker="boundary",
+            reviewer="boundary",
             candidates=[outside],
         )
     with pytest.raises(ValidationError, match="case artifact path"):
@@ -329,7 +329,7 @@ def test_round_two_requires_closed_moving_round_one() -> None:
     first = attack_fact(0)
     second = attack_fact(1)
 
-    with pytest.raises(RoundGateError, match="round 1 attacks"):
+    with pytest.raises(RoundGateError, match="round 1 reviews"):
         validate_round_gate(2, existing_attacks=[], active_rulings={})
     with pytest.raises(RoundGateError, match="still open"):
         validate_round_gate(2, existing_attacks=[first, second], active_rulings={})
@@ -394,14 +394,12 @@ def test_selected_candidates_become_one_durable_batch_and_raw_candidates_do_not(
 
 
 def candidate_digest_from_fact(fact: AttackFact) -> str:
-    return candidate_digest(
-        AttackCandidate.model_validate(
-            fact.model_dump(
-                mode="json",
-                exclude={"schema_version", "id", "ts", "kind", "case_id", "round"},
-            )
-        )
+    payload = fact.model_dump(
+        mode="json",
+        exclude={"schema_version", "id", "ts", "kind", "case_id", "round"},
     )
+    payload["risk_scenario"] = payload.pop("hate_scenario")
+    return candidate_digest(ReviewCandidate.model_validate(payload))
 
 
 def test_empty_selection_does_not_append_a_batch() -> None:
@@ -527,15 +525,15 @@ def test_collision_renderer_rejects_empty_mixed_or_duplicate_batches() -> None:
         render_collision_markdown(CASE_ID, [attacks[0], attacks[0]])
 
 
-def test_prompts_define_all_attackers_and_machine_checked_selector_contract() -> None:
+def test_prompts_define_all_reviewers_and_machine_checked_selector_contract() -> None:
     root = Path(__file__).parents[1]
     for klass in ("boundary", "consequence", "prototype", "conflict", "omission"):
-        prompt = (root / "falsiq" / "prompts" / f"attacker_{klass}.md").read_text()
+        prompt = (root / "falsiq" / "prompts" / f"reviewer_{klass}.md").read_text()
         normalized = " ".join(prompt.split())
         assert f"`{klass}`" in prompt
         assert "0 to 4" in normalized
         assert "concrete artifact" in normalized
-        assert "hate_scenario" in prompt
+        assert "risk_scenario" in prompt
         assert "settles" in prompt
 
     selector = (root / "agents" / "selector.md").read_text()

@@ -13,9 +13,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from .attacks import (
-    AttackCandidate,
-    AttackCandidateBatch,
-    AttackClass,
+    ReviewCandidate,
+    ReviewCandidateBatch,
+    ReviewClass,
     SelectionEnvelope,
     build_selection_envelope,
 )
@@ -31,39 +31,40 @@ from .facts import (
 )
 from .ledger import FalsiqError, Ledger, LedgerValidationError, derive_case_state
 from .prompt_assets import load_production_prompt
+from .review_language import neutralize_review_state
 
-ATTACK_CLASSES = ("boundary", "consequence", "prototype", "conflict", "omission")
+REVIEW_CLASSES = ("boundary", "consequence", "prototype", "conflict", "omission")
 MAX_ATTACK_BATCH_BYTES = 1_000_000
 
 
 class AssemblyError(FalsiqError):
-    """An attacker batch cannot safely participate in deterministic selection."""
+    """A reviewer batch cannot safely participate in deterministic selection."""
 
 
 class GuardError(FalsiqError):
     """The human-ruling or derivation barrier has not been satisfied."""
 
 
-class AttackGenerationRequest(BaseModel):
-    """Self-contained instructions and schema for one external attacker."""
+class ReviewGenerationRequest(BaseModel):
+    """Self-contained instructions and schema for one external reviewer."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
     schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
     case_id: Ulid
-    attacker: AttackClass
+    reviewer: ReviewClass
     instructions: str = Field(min_length=1)
     state: dict[str, object]
     response_schema: dict[str, object]
     examples: list[dict[str, object]] = Field(min_length=2, max_length=2)
 
 
-def _attack_example(case_id: str, attacker: AttackClass) -> AttackCandidateBatch:
+def _review_example(case_id: str, reviewer: ReviewClass) -> ReviewCandidateBatch:
     options = [
         ArtifactOption(key="A", body="Preserve the existing behavior."),
         ArtifactOption(key="B", body="Use the new behavior."),
     ]
-    if attacker == "consequence":
+    if reviewer == "consequence":
         artifact = Artifact(
             type="scenario",
             body=(
@@ -71,48 +72,48 @@ def _attack_example(case_id: str, attacker: AttackClass) -> AttackCandidateBatch
                 "sees the new behavior."
             ),
         )
-    elif attacker in {"prototype", "conflict"}:
+    elif reviewer in {"prototype", "conflict"}:
         artifact = Artifact(type="rivals", options=options)
     else:
         artifact = Artifact(type="input", options=options)
-    decision = f"observable {attacker} behavior"
-    candidate = AttackCandidate(
-        klass=attacker,
+    decision = f"observable {reviewer} behavior"
+    candidate = ReviewCandidate(
+        klass=reviewer,
         targets=[case_id],
         artifact=artifact,
         settles=[decision],
         silent_settles=[decision],
-        hate_scenario="The implementation silently chooses the behavior the user rejects.",
-        render_cost="cheap" if attacker == "prototype" else "trivial",
+        risk_scenario="The implementation silently chooses the behavior the user rejects.",
+        render_cost="cheap" if reviewer == "prototype" else "trivial",
     )
-    return AttackCandidateBatch(case_id=case_id, attacker=attacker, candidates=[candidate])
+    return ReviewCandidateBatch(case_id=case_id, reviewer=reviewer, candidates=[candidate])
 
 
-def build_attack_request(
+def build_review_request(
     ledger: Ledger,
     case_id: str,
-    attacker: AttackClass,
-) -> AttackGenerationRequest:
-    """Build one exact, role-scoped attacker contract from current ledger state."""
+    reviewer: ReviewClass,
+) -> ReviewGenerationRequest:
+    """Build one exact, role-scoped reviewer contract from current ledger state."""
 
     TypeAdapter(Ulid).validate_python(case_id, strict=True)
-    TypeAdapter(AttackClass).validate_python(attacker, strict=True)
+    TypeAdapter(ReviewClass).validate_python(reviewer, strict=True)
     case_state = ledger.state(case_id)
-    state = ledger.state() if attacker == "conflict" else case_state
-    empty = AttackCandidateBatch(case_id=case_id, attacker=attacker, candidates=[])
-    populated = _attack_example(case_id, attacker)
-    return AttackGenerationRequest(
+    state = neutralize_review_state(ledger.state() if reviewer == "conflict" else case_state)
+    empty = ReviewCandidateBatch(case_id=case_id, reviewer=reviewer, candidates=[])
+    populated = _review_example(case_id, reviewer)
+    return ReviewGenerationRequest(
         case_id=case_id,
-        attacker=attacker,
-        instructions=load_production_prompt(attacker),
+        reviewer=reviewer,
+        instructions=load_production_prompt(reviewer),
         state=state,
-        response_schema=AttackCandidateBatch.model_json_schema(),
+        response_schema=ReviewCandidateBatch.model_json_schema(),
         examples=[empty.model_dump(mode="json"), populated.model_dump(mode="json")],
     )
 
 
-def canonical_attack_request_json(request: AttackGenerationRequest) -> str:
-    """Serialize one attacker request deterministically."""
+def canonical_review_request_json(request: ReviewGenerationRequest) -> str:
+    """Serialize one reviewer request deterministically."""
 
     return json.dumps(
         request.model_dump(mode="json"),
@@ -136,29 +137,29 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return result
 
 
-def prepare_attack_batch(
+def prepare_review_batch(
     case_id: str,
-    attacker: AttackClass,
+    reviewer: ReviewClass,
     path: Path,
-) -> tuple[AttackCandidateBatch, bool]:
+) -> tuple[ReviewCandidateBatch, bool]:
     """Validate untrusted output or replace it with a canonical empty batch.
 
     A model can validly emit no candidates, so malformed output has no safer
-    semantic recovery than the same empty contribution. Other attacker roles
+    semantic recovery than the same empty contribution. Other reviewer roles
     can still complete the round, and deterministic assembly remains strict.
     """
 
     TypeAdapter(Ulid).validate_python(case_id, strict=True)
-    TypeAdapter(AttackClass).validate_python(attacker, strict=True)
-    fallback = AttackCandidateBatch(case_id=case_id, attacker=attacker, candidates=[])
+    TypeAdapter(ReviewClass).validate_python(reviewer, strict=True)
+    fallback = ReviewCandidateBatch(case_id=case_id, reviewer=reviewer, candidates=[])
     try:
         value = json.loads(
             _read_regular_file(path).decode("utf-8"),
             parse_constant=_reject_json_constant,
             object_pairs_hook=_reject_duplicate_keys,
         )
-        batch = AttackCandidateBatch.model_validate(value)
-        if batch.case_id != case_id or batch.attacker != attacker:
+        batch = ReviewCandidateBatch.model_validate(value)
+        if batch.case_id != case_id or batch.reviewer != reviewer:
             return fallback, True
     except (AssemblyError, RecursionError, UnicodeDecodeError, ValueError, TypeError):
         return fallback, True
@@ -207,27 +208,27 @@ def assemble_attack_round(
 ) -> SelectionEnvelope:
     """Validate five class batches and return the canonical model-free selection."""
 
-    if len(paths) != len(ATTACK_CLASSES):
-        raise AssemblyError("exactly five attacker batch files are required")
+    if len(paths) != len(REVIEW_CLASSES):
+        raise AssemblyError("exactly five reviewer batch files are required")
     TypeAdapter(Ulid).validate_python(case_id, strict=True)
 
-    batches: dict[str, AttackCandidateBatch] = {}
+    batches: dict[str, ReviewCandidateBatch] = {}
     for path in paths:
-        batch = AttackCandidateBatch.model_validate_json(_read_regular_file(path))
+        batch = ReviewCandidateBatch.model_validate_json(_read_regular_file(path))
         if batch.case_id != case_id:
             raise AssemblyError(
                 f"batch case mismatch in {path}: expected {case_id}, got {batch.case_id}"
             )
-        if batch.attacker in batches:
-            raise AssemblyError(f"duplicate attacker batch: {batch.attacker}")
-        batches[batch.attacker] = batch
+        if batch.reviewer in batches:
+            raise AssemblyError(f"duplicate reviewer batch: {batch.reviewer}")
+        batches[batch.reviewer] = batch
 
-    missing = sorted(set(ATTACK_CLASSES).difference(batches))
+    missing = sorted(set(REVIEW_CLASSES).difference(batches))
     if missing:
-        raise AssemblyError(f"missing attacker batches: {', '.join(missing)}")
+        raise AssemblyError(f"missing reviewer batches: {', '.join(missing)}")
 
     candidates = [
-        candidate for attacker in ATTACK_CLASSES for candidate in batches[attacker].candidates
+        candidate for reviewer in REVIEW_CLASSES for candidate in batches[reviewer].candidates
     ]
     return build_selection_envelope(case_id, round_number, candidates)
 
@@ -361,9 +362,9 @@ def ready_brief(case_id: str, start: Path | None = None) -> tuple[Ledger, Path]:
     state = derive_case_state(facts, case_id)
     open_attacks = state["open_attacks"]
     if not isinstance(open_attacks, list):
-        raise LedgerValidationError("case state contains invalid open attacks")
+        raise LedgerValidationError("case state contains invalid open reviews")
     if open_attacks:
-        label = "attack" if len(open_attacks) == 1 else "attacks"
+        label = "review" if len(open_attacks) == 1 else "reviews"
         raise GuardError(
             f"case {case_id} has {len(open_attacks)} open {label}; STOP -- HUMAN RULING REQUIRED"
         )
@@ -400,15 +401,15 @@ def ready_brief(case_id: str, start: Path | None = None) -> tuple[Ledger, Path]:
 
 
 __all__ = [
-    "ATTACK_CLASSES",
+    "REVIEW_CLASSES",
     "MAX_ATTACK_BATCH_BYTES",
-    "AttackGenerationRequest",
+    "ReviewGenerationRequest",
     "AssemblyError",
     "GuardError",
     "assemble_attack_round",
-    "build_attack_request",
-    "canonical_attack_request_json",
+    "build_review_request",
+    "canonical_review_request_json",
     "canonical_selection_json",
-    "prepare_attack_batch",
+    "prepare_review_batch",
     "ready_brief",
 ]

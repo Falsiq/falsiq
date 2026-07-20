@@ -38,6 +38,7 @@ from .facts import (
 )
 from .ledger import derive_case_state
 from .prompt_assets import load_production_prompt
+from .review_language import neutralize_review_state
 
 DERIVER_PROMPT = load_production_prompt("deriver")
 
@@ -275,7 +276,7 @@ def build_derivation_request(
     open_attacks = state.get("open_attacks")
     if isinstance(open_attacks, list) and open_attacks:
         raise DerivationError(
-            f"case {case_id} has {len(open_attacks)} open attacks; rule them before derive"
+            f"case {case_id} has {len(open_attacks)} open reviews; rule them before derive"
         )
     ledger_head = facts[-1].id
     payload: dict[str, object] = {
@@ -284,7 +285,7 @@ def build_derivation_request(
         "ledger_head": ledger_head,
         "instructions": DERIVER_PROMPT,
         "prompt_sha256": deriver_prompt_hash(),
-        "state": state,
+        "state": neutralize_review_state(state),
         "response_schema": DeriverResponse.model_json_schema(),
     }
     identity_payload = dict(payload)
@@ -366,7 +367,7 @@ def _html_code(value: str) -> str:
 def _render_ruling_evidence(attack: AttackFact, ruling: RulingFact) -> list[str]:
     choice = f"`{ruling.choice}`" if ruling.choice is not None else "—"
     lines = [
-        f"### Attack `{attack.id}` → ruling `{ruling.id}`",
+        f"### Review `{attack.id}` → ruling `{ruling.id}`",
         "",
         f"- Class: `{attack.klass}`",
         f"- Verdict: `{ruling.verdict}`",
@@ -401,7 +402,7 @@ def _render_ruling_evidence(attack: AttackFact, ruling: RulingFact) -> list[str]
             )
     lines.extend(
         [
-            "#### Hate scenario",
+            "#### Risk scenario",
             "",
             *_verbatim_fence(attack.hate_scenario),
             "",
@@ -463,7 +464,7 @@ def render_implementation_brief(
         [
             "## Rulings",
             "",
-            "| Ruling | Attack | Class | Verdict | Choice |",
+            "| Ruling | Review | Class | Verdict | Choice |",
             "| --- | --- | --- | --- | --- |",
         ]
     )
@@ -501,7 +502,7 @@ def render_implementation_brief(
     else:
         for ruling in forbidden:
             item = by_ruling[ruling.id]
-            prefix = f"- Ruling `{ruling.id}` (attack `{ruling.attack_id}`)"
+            prefix = f"- Ruling `{ruling.id}` (review `{ruling.attack_id}`)"
             if item.content is not None:
                 lines.append(f"{prefix}: [{item.filename}](tests/{item.filename})")
             else:
@@ -520,7 +521,7 @@ def render_implementation_brief(
                 decision = _escape_markdown_inline(settled)
                 lines.append(
                     f"- **{decision}** — explicitly licensed by active `dont_care` ruling "
-                    f"`{ruling.id}` for attack `{source_attack.id}`."
+                    f"`{ruling.id}` for review `{source_attack.id}`."
                 )
         lines.append("")
     return "\n".join(lines)

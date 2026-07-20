@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 import falsiq.cli as cli_module
-from falsiq.attacks import AttackCandidate, build_selection_envelope
+from falsiq.attacks import ReviewCandidate, build_selection_envelope
 from falsiq.cli import main
 from falsiq.facts import (
     Artifact,
@@ -30,9 +30,9 @@ def make_candidate(
     *,
     klass: str,
     settles: int,
-) -> AttackCandidate:
+) -> ReviewCandidate:
     decisions = [f"{name} decision {index}" for index in range(settles)]
-    return AttackCandidate(
+    return ReviewCandidate(
         klass=klass,
         targets=[case_id],
         artifact=Artifact(
@@ -42,7 +42,7 @@ def make_candidate(
         ),
         settles=decisions,
         silent_settles=decisions[:1],
-        hate_scenario=f"The {name} behavior loses data.",
+        risk_scenario=f"The {name} behavior loses data.",
         render_cost="trivial",
     )
 
@@ -51,7 +51,7 @@ def write_envelope(
     path: Path,
     case_id: str,
     round_number: int,
-    candidates: list[AttackCandidate],
+    candidates: list[ReviewCandidate],
 ) -> Path:
     envelope = build_selection_envelope(case_id, round_number, candidates)
     path.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
@@ -81,7 +81,7 @@ def test_attack_add_persists_only_selected_facts_and_collide_renders_open_attack
     ]
     envelope_path = write_envelope(repo / "round-1.json", case_id, 1, candidates)
 
-    assert main(["attack", "add", "-f", str(envelope_path)]) == 0
+    assert main(["review", "add", "-f", str(envelope_path)]) == 0
     output = capsys.readouterr()
     attack_ids = output.out.splitlines()
     assert output.err == ""
@@ -124,7 +124,7 @@ def test_attack_add_rejects_tampered_selection_without_mutating_ledger(
     ledger_path = repo / ".falsiq" / "ledger.jsonl"
     before = ledger_path.read_bytes()
 
-    assert main(["attack", "add", "-f", str(path)]) == 2
+    assert main(["review", "add", "-f", str(path)]) == 2
     output = capsys.readouterr()
     assert output.out == ""
     assert "deterministic selection policy" in output.err
@@ -145,12 +145,12 @@ def test_attack_add_enforces_one_batch_and_evidence_gated_round_two(
             make_candidate(case_id, "two", klass="consequence", settles=1),
         ],
     )
-    assert main(["attack", "add", "-f", str(first_path)]) == 0
+    assert main(["review", "add", "-f", str(first_path)]) == 0
     capsys.readouterr()
     ledger_path = repo / ".falsiq" / "ledger.jsonl"
     before_duplicate = ledger_path.read_bytes()
 
-    assert main(["attack", "add", "-f", str(first_path)]) == 2
+    assert main(["review", "add", "-f", str(first_path)]) == 2
     duplicate_output = capsys.readouterr()
     assert "round 1 already exists" in duplicate_output.err
     assert ledger_path.read_bytes() == before_duplicate
@@ -161,7 +161,7 @@ def test_attack_add_enforces_one_batch_and_evidence_gated_round_two(
         2,
         [make_candidate(case_id, "round-two", klass="conflict", settles=1)],
     )
-    assert main(["attack", "add", "-f", str(round_two_path)]) == 2
+    assert main(["review", "add", "-f", str(round_two_path)]) == 2
     open_output = capsys.readouterr()
     assert "round 1 is still open" in open_output.err
 
@@ -180,7 +180,7 @@ def test_attack_add_enforces_one_batch_and_evidence_gated_round_two(
         )
     ledger.append_batch(intended_rulings)
 
-    assert main(["attack", "add", "-f", str(round_two_path)]) == 2
+    assert main(["review", "add", "-f", str(round_two_path)]) == 2
     settled_output = capsys.readouterr()
     assert "amend or forbidden" in settled_output.err
 
@@ -195,7 +195,7 @@ def test_attack_add_enforces_one_batch_and_evidence_gated_round_two(
             supersedes=first_ruling.id,
         )
     )
-    assert main(["attack", "add", "-f", str(round_two_path)]) == 0
+    assert main(["review", "add", "-f", str(round_two_path)]) == 0
     allowed_output = capsys.readouterr()
     assert allowed_output.err == ""
     assert len(allowed_output.out.splitlines()) == 1
@@ -210,7 +210,7 @@ def test_attack_add_handles_degenerate_empty_pool_without_a_ledger_fact(
     ledger_path = repo / ".falsiq" / "ledger.jsonl"
     before = ledger_path.read_bytes()
 
-    assert main(["attack", "add", "-f", str(path)]) == 0
+    assert main(["review", "add", "-f", str(path)]) == 0
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err == ""
@@ -226,7 +226,7 @@ def test_collide_requires_a_known_case_with_open_attacks(
     assert main(["collide", "--case", case_id]) == 2
     output = capsys.readouterr()
     assert output.out == ""
-    assert "no open attacks" in output.err
+    assert "no open reviews" in output.err
 
     unknown = new_ulid()
     assert main(["collide", "--case", unknown]) == 2
@@ -243,7 +243,7 @@ def test_attack_add_reports_malformed_json_as_one_actionable_error(
     malformed = repo / "bad.json"
     malformed.write_text("{not json", encoding="utf-8")
 
-    assert main(["attack", "add", "-f", str(malformed)]) == 2
+    assert main(["review", "add", "-f", str(malformed)]) == 2
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err.startswith("error: Invalid JSON")
@@ -281,7 +281,7 @@ def test_concurrent_ledger_change_rejects_the_whole_attack_batch(
 
     monkeypatch.setattr(cli_module, "append_attack_round", append_after_concurrent_change)
 
-    assert main(["attack", "add", "-f", str(path)]) == 2
+    assert main(["review", "add", "-f", str(path)]) == 2
     output = capsys.readouterr()
     assert output.out == ""
     assert "ledger head changed" in output.err

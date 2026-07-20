@@ -343,9 +343,11 @@ class OutcomeFact(FactBase):
             if self.trace == "n/a":
                 raise ValueError("rework requires an elicited, missable, or novel trace")
             if (self.trace == "elicited") != (self.attack_id is not None):
-                raise ValueError("only elicited rework requires an attack_id")
+                raise ValueError("only elicited rework requires a review reference")
         elif self.trace != "n/a" or self.attack_id is not None:
-            raise ValueError("accepted and abandoned outcomes require trace n/a and no attack_id")
+            raise ValueError(
+                "accepted and abandoned outcomes require trace n/a and no review reference"
+            )
         return self
 
 

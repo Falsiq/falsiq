@@ -193,7 +193,7 @@ def _normalized_text(value: str) -> str:
 
 
 def detect_principal_leaks(task: EvalTask, response: PrincipalRuling) -> tuple[str, ...]:
-    """Detect verbatim hidden text from requirements not implicated by the attack."""
+    """Detect verbatim hidden text from requirements not implicated by the review."""
 
     known = {requirement.id for requirement in task.latent_requirements}
     implicated = set(response.implicated_requirement_ids)

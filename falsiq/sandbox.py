@@ -692,7 +692,7 @@ def sandbox_json(sandbox: Sandbox) -> str:
 
     return json.dumps(
         {
-            "attack_id": sandbox.attack_id,
+            "review_id": sandbox.attack_id,
             "branch": sandbox.branch,
             "path": sandbox.relative_path.as_posix(),
         },

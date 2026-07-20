@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from falsiq.evaluation import AGENT_ROLES
+
 AGENTS = Path(__file__).parents[1] / "agents"
 
 
@@ -58,3 +60,17 @@ def test_judge_is_condition_blind_and_scores_each_requirement() -> None:
     assert "condition-blind" in prompt
     assert "0, 0.5, or 1" in prompt
     assert "requirement_scores" in prompt
+
+
+def test_external_evaluation_roles_and_prompts_use_reviewer_vocabulary() -> None:
+    prompts = "\n".join(path.read_text(encoding="utf-8") for path in AGENTS.glob("*.md"))
+
+    assert all(not role.startswith("attacker.") for role in AGENT_ROLES)
+    assert {role for role in AGENT_ROLES if role.startswith("reviewer.")} == {
+        "reviewer.boundary",
+        "reviewer.consequence",
+        "reviewer.prototype",
+        "reviewer.conflict",
+        "reviewer.omission",
+    }
+    assert "attacker" not in prompts.casefold()

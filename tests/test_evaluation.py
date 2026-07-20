@@ -30,12 +30,12 @@ from falsiq.evaluation import (
     ArtifactOption as EvaluationArtifactOption,
 )
 from falsiq.evaluation import (
-    AttackCandidate as EvaluationAttackCandidate,
+    ReviewCandidate as EvaluationReviewCandidate,
 )
 from falsiq.evaluation import TestResult as EvaluationTestResult
 
 FIXTURES = Path(__file__).parent / "fixtures" / "eval"
-ATTACKER_ROLES = tuple(role for role in AGENT_ROLES if role.startswith("attacker."))
+REVIEWER_ROLES = tuple(role for role in AGENT_ROLES if role.startswith("reviewer."))
 
 
 def evaluation_artifact(
@@ -52,32 +52,32 @@ def evaluation_artifact(
 
 
 def test_evaluation_consequence_contract_enforces_the_narrative_budget() -> None:
-    candidate = EvaluationAttackCandidate(
-        attack_id="downstream",
+    candidate = EvaluationReviewCandidate(
+        review_id="downstream",
         klass="consequence",
         artifact=evaluation_artifact(words=150),
         settles=["operational consequence"],
-        hate_scenario="month-later maintenance becomes unsafe",
+        risk_scenario="month-later maintenance becomes unsafe",
         render_cost="trivial",
     )
     assert len(candidate.artifact.body.split()) == 150
 
     with pytest.raises(ValidationError, match="consequence"):
-        EvaluationAttackCandidate(
-            attack_id="too-long",
+        EvaluationReviewCandidate(
+            review_id="too-long",
             klass="consequence",
             artifact=evaluation_artifact(words=151),
             settles=["operational consequence"],
-            hate_scenario="month-later maintenance becomes unsafe",
+            risk_scenario="month-later maintenance becomes unsafe",
             render_cost="trivial",
         )
     with pytest.raises(ValidationError, match="consequence"):
-        EvaluationAttackCandidate(
-            attack_id="wrong-kind",
+        EvaluationReviewCandidate(
+            review_id="wrong-kind",
             klass="consequence",
             artifact=evaluation_artifact(artifact_type="transcript"),
             settles=["operational consequence"],
-            hate_scenario="month-later maintenance becomes unsafe",
+            risk_scenario="month-later maintenance becomes unsafe",
             render_cost="trivial",
         )
 
@@ -135,13 +135,13 @@ class ScriptedRuntime:
         round_number = int(payload.get("round", 0))
         task_id = str(payload["task"]["task_id"])
         response: dict[str, Any]
-        if role in ATTACKER_ROLES:
-            attacks: list[dict[str, Any]] = []
-            if task_id == "smoke_retry" and role == "attacker.boundary":
-                attack_id = "a404" if round_number == 1 else "acap"
-                attacks = [
+        if role in REVIEWER_ROLES:
+            reviews: list[dict[str, Any]] = []
+            if task_id == "smoke_retry" and role == "reviewer.boundary":
+                review_id = "a404" if round_number == 1 else "acap"
+                reviews = [
                     {
-                        "attack_id": attack_id,
+                        "review_id": review_id,
                         "klass": "boundary",
                         "artifact": {
                             "type": "transcript",
@@ -155,14 +155,14 @@ class ScriptedRuntime:
                         },
                         "settles": ["retry status" if round_number == 1 else "attempt cap"],
                         "silent_settles": [],
-                        "hate_scenario": "duplicate traffic hides a persistent failure",
+                        "risk_scenario": "duplicate traffic hides a persistent failure",
                         "render_cost": "trivial",
                     }
                 ]
-            elif task_id == "smoke_retry" and role == "attacker.omission" and round_number == 1:
-                attacks = [
+            elif task_id == "smoke_retry" and role == "reviewer.omission" and round_number == 1:
+                reviews = [
                     {
-                        "attack_id": "alog",
+                        "review_id": "alog",
                         "klass": "omission",
                         "artifact": {
                             "type": "scenario",
@@ -174,11 +174,11 @@ class ScriptedRuntime:
                         },
                         "settles": ["retry logging"],
                         "silent_settles": ["retry logging"],
-                        "hate_scenario": "operators cannot diagnose latency",
+                        "risk_scenario": "operators cannot diagnose latency",
                         "render_cost": "trivial",
                     }
                 ]
-            response = {"request_id": request.request_id, "attacks": attacks}
+            response = {"request_id": request.request_id, "reviews": reviews}
         elif role == "selector":
             selected = sorted(
                 payload["candidates"],
@@ -186,12 +186,12 @@ class ScriptedRuntime:
             )
             response = {
                 "request_id": request.request_id,
-                "selected_attack_ids": [item["attack_id"] for item in selected],
+                "selected_review_ids": [item["review_id"] for item in selected],
                 "rationale": "select every bounded smoke candidate",
             }
         elif role == "principal":
-            attack_id = str(payload["attack"]["attack_id"])
-            if attack_id == "a404":
+            review_id = str(payload["review"]["review_id"])
+            if review_id == "a404":
                 amendment = "stop after three total attempts" if self.leak else None
                 response = {
                     "request_id": request.request_id,
@@ -200,7 +200,7 @@ class ScriptedRuntime:
                     "amendment_text": amendment,
                     "implicated_requirement_ids": ["LR1"],
                 }
-            elif attack_id == "acap":
+            elif review_id == "acap":
                 response = {
                     "request_id": request.request_id,
                     "verdict": "amend",
@@ -322,10 +322,10 @@ def test_role_payload_allowlists_keep_hidden_data_out_of_public_agents(
             assert "latent_requirements" not in rendered
 
     public_payload = next(
-        request.payload for request in runtime.calls if request.role == "attacker.boundary"
+        request.payload for request in runtime.calls if request.role == "reviewer.boundary"
     )
     with pytest.raises(ValidationError):
-        validate_role_payload("attacker.boundary", {**public_payload, "hidden_spec": []})
+        validate_role_payload("reviewer.boundary", {**public_payload, "hidden_spec": []})
 
 
 def test_evaluation_runs_both_conditions_with_equal_round_budget_and_metrics(
@@ -353,7 +353,7 @@ def test_evaluation_runs_both_conditions_with_equal_round_budget_and_metrics(
     falsiq_rounds = {
         int(request.payload["round"])
         for request in runtime.calls
-        if request.role.startswith("attacker.")
+        if request.role.startswith("reviewer.")
     }
     baseline_rounds = {
         int(request.payload["round"])
@@ -437,12 +437,12 @@ def test_selector_cannot_reference_an_unknown_candidate(smoke_task: EvalTask) ->
             if request.role == "selector":
                 return {
                     "request_id": request.request_id,
-                    "selected_attack_ids": ["unknown"],
+                    "selected_review_ids": ["unknown"],
                     "rationale": "invalid selection",
                 }
             return super()._response(request)
 
-    with pytest.raises(EvaluationProtocolError, match="unknown attack"):
+    with pytest.raises(EvaluationProtocolError, match="unknown review"):
         run_evaluation((smoke_task,), runtime=BadSelectorRuntime())
 
 
@@ -452,7 +452,7 @@ def test_round_two_is_gated_when_round_one_does_not_move_intent(
     class SettledRuntime(ScriptedRuntime):
         def _response(self, request: AgentRequest) -> dict[str, Any]:
             response = super()._response(request)
-            if request.role == "principal" and request.payload["attack"]["attack_id"] == "a404":
+            if request.role == "principal" and request.payload["review"]["review_id"] == "a404":
                 response = {
                     "request_id": request.request_id,
                     "verdict": "intended",
@@ -470,7 +470,7 @@ def test_round_two_is_gated_when_round_one_does_not_move_intent(
     falsiq_rounds = {
         int(request.payload["round"])
         for request in runtime.calls
-        if request.role.startswith("attacker.")
+        if request.role.startswith("reviewer.")
     }
     assert falsiq_rounds == {1}
 
@@ -488,7 +488,7 @@ def test_all_intended_rounds_are_flagged_as_a_sycophancy_signal(
                     "choice": "B",
                     "amendment_text": None,
                     "implicated_requirement_ids": (
-                        ["LR1"] if request.payload["attack"]["attack_id"] == "a404" else []
+                        ["LR1"] if request.payload["review"]["review_id"] == "a404" else []
                     ),
                 }
             return response
@@ -586,7 +586,7 @@ def test_replay_runtime_rejects_pathlike_request_ids_before_filesystem_access(
     tmp_path: Path, smoke_task: EvalTask
 ) -> None:
     payload = validate_role_payload(
-        "attacker.boundary",
+        "reviewer.boundary",
         {
             "task": smoke_task.public_projection().model_dump(mode="json"),
             "round": 1,
@@ -596,7 +596,7 @@ def test_replay_runtime_rejects_pathlike_request_ids_before_filesystem_access(
     runtime = AgentRuntime(tmp_path / "recordings", tmp_path / "transcripts")
 
     with pytest.raises(ValueError, match="safe stable token"):
-        runtime.invoke("attacker.boundary", "../escape", payload)
+        runtime.invoke("reviewer.boundary", "../escape", payload)
 
     assert not (tmp_path / "escape.json").exists()
 
@@ -684,14 +684,14 @@ def test_falsiq_builder_handoff_preserves_active_decision_evidence(
     assert "## Original request context (verbatim)" in handoff
     assert smoke_task.vague_prompt in handoff
     assert "## Intent (verbatim)" in handoff
-    assert "### Active amendment from attack `acap`" in handoff
+    assert "### Active amendment from review `acap`" in handoff
     assert "stop after three total attempts" in handoff
     assert "### Superseded initial intent" not in handoff
 
     assert "| `a404` | 1 | boundary | forbidden | `A` |" in handoff
     assert "| `alog` | 1 | omission | dont_care | — |" in handoff
     assert "| `acap` | 2 | boundary | amend | — |" in handoff
-    assert "### Attack `a404`" in handoff
+    assert "### Review `a404`" in handoff
     assert "- Settles:" in handoff
     assert "retry status" in handoff
     assert "#### Artifact (`transcript`)" in handoff
@@ -700,7 +700,7 @@ def test_falsiq_builder_handoff_preserves_active_decision_evidence(
     assert "allow the rendered behavior" in handoff
     assert "##### Choice `B`" in handoff
     assert "reject the rendered behavior" in handoff
-    assert "#### Hate scenario" in handoff
+    assert "#### Risk scenario" in handoff
     assert "duplicate traffic hides a persistent failure" in handoff
     assert "- Verdict: `forbidden`" in handoff
     assert "- Choice: `A`" in handoff
@@ -721,7 +721,7 @@ def test_falsiq_builder_handoff_preserves_active_decision_evidence(
     assert "## Agent discretion" in handoff
     discretion_section = handoff.split("## Agent discretion\n", 1)[1]
     assert "retry logging" in discretion_section
-    assert "licensed by `dont_care` ruling for attack `alog`" in discretion_section
+    assert "licensed by `dont_care` ruling for review `alog`" in discretion_section
     assert "retry status" not in discretion_section
     assert "attempt cap" not in discretion_section
 
@@ -734,22 +734,22 @@ def test_falsiq_builder_handoff_preserves_active_decision_evidence(
 def test_falsiq_handoff_marks_only_the_latest_amendment_as_active(
     smoke_task: EvalTask,
 ) -> None:
-    def amendment(attack_id: str, text: str, round_number: int) -> Any:
-        attack = EvaluationAttackCandidate(
-            attack_id=attack_id,
+    def amendment(review_id: str, text: str, round_number: int) -> Any:
+        review = EvaluationReviewCandidate(
+            review_id=review_id,
             klass="boundary",
             artifact=evaluation_artifact(artifact_type="transcript"),
             settles=["retry policy"],
-            hate_scenario="the retry behavior surprises an operator",
+            risk_scenario="the retry behavior surprises an operator",
             render_cost="trivial",
         )
         ruling = evaluation_module.PublicRuling(
-            attack_id=attack_id,
+            review_id=review_id,
             round=round_number,
             verdict="amend",
             amendment_text=text,
         )
-        return evaluation_module._FalsiqDecision(attack=attack, ruling=ruling)
+        return evaluation_module._FalsiqDecision(review=review, ruling=ruling)
 
     handoff = evaluation_module._render_falsiq_handoff(
         smoke_task.public_projection(),
@@ -760,12 +760,12 @@ def test_falsiq_handoff_marks_only_the_latest_amendment_as_active(
     )
 
     active_intent = handoff.split("## Intent (verbatim)\n", 1)[1].split("## Rulings\n", 1)[0]
-    assert "### Active amendment from attack `latest-amendment`" in active_intent
+    assert "### Active amendment from review `latest-amendment`" in active_intent
     assert "latest verbatim amendment" in active_intent
     assert "first verbatim amendment" not in active_intent
     assert smoke_task.vague_prompt not in active_intent
-    assert "### Amendment ruling for attack `first-amendment` (verbatim; superseded)" in handoff
-    assert "### Amendment ruling for attack `latest-amendment` (verbatim; active)" in handoff
+    assert "### Amendment ruling for review `first-amendment` (verbatim; superseded)" in handoff
+    assert "### Amendment ruling for review `latest-amendment` (verbatim; active)" in handoff
 
 
 def test_conformance_reports_are_redacted_and_reproducible(

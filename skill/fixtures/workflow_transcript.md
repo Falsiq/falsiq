@@ -6,36 +6,36 @@ mode-`0700` temporary directory outside the worktree.
 ## Collision and handoff path
 
 ```text
-[user requests a nontrivial change]
+[user explicitly requests a nontrivial change with falsiq]
 $ command -v falsiq && falsiq --version
 <installed falsiq 0.1.0 console tool outside the target dependency graph>
 $ falsiq intent "<verbatim request>"
 <CASE>
-$ falsiq attack request --case <CASE> --attacker <each class>
+$ falsiq review request --case <CASE> --reviewer <each class>
 <five self-contained requests with instructions, JSON Schema, and examples>
-[five fresh class-specific attackers run in parallel]
-$ falsiq attack prepare --case <CASE> --attacker <each class> --file <raw response>
+[five fresh class-specific reviewers run in parallel]
+$ falsiq review prepare --case <CASE> --reviewer <each class> --file <raw response>
 <five validated batches; malformed output becomes that class's empty batch>
 [any degraded role warning is disclosed with the round result]
-$ falsiq attack assemble --case <CASE> --round 1 <five batch files>
+$ falsiq review assemble --case <CASE> --round 1 <five batch files>
 {"candidates":[...],"selected":["<digest>",...],...}
-$ falsiq attack add --file <round.json>
-<ATTACK IDs>
+$ falsiq review add --file <round.json>
+<REVIEW IDs>
 $ falsiq collide --case <CASE>
 <complete forced-choice collision is presented>
 STOP -- HUMAN RULING REQUIRED
-No implementation has started. Reply with an explicit ruling for every displayed attack.
+No implementation has started. Reply with an explicit ruling for every displayed review.
 [agent ends the turn; no implementation or derivation occurs]
 [user supplies explicit rulings]
-$ falsiq rule <ATTACK> forbidden
-[all other explicit ruling commands run; omitted attacks remain open]
-[state confirms zero open attacks and the forbidden ruling opens the round-two gate]
-$ falsiq attack request --case <CASE> --attacker <each class>
-[five fresh class-specific attackers run in parallel for round 2]
-$ falsiq attack prepare --case <CASE> --attacker <each class> --file <raw response>
-$ falsiq attack assemble --case <CASE> --round 2 <five batch files>
+$ falsiq rule <REVIEW> forbidden
+[all other explicit ruling commands run; omitted reviews remain open]
+[state confirms zero open reviews and the forbidden ruling opens the round-two gate]
+$ falsiq review request --case <CASE> --reviewer <each class>
+[five fresh class-specific reviewers run in parallel for round 2]
+$ falsiq review prepare --case <CASE> --reviewer <each class> --file <raw response>
+$ falsiq review assemble --case <CASE> --round 2 <five batch files>
 {"candidates":[],"selected":[],...}
-[round-2 attack add and collide are not called because selection is empty]
+[round-2 review add and collide are not called because selection is empty]
 $ falsiq derive --case <CASE>
 <request.json>
 $ cat <request.json>
@@ -60,10 +60,10 @@ $ falsiq outcome abandoned --case <CASE> --trace n/a --notes "User explicitly re
 ## Degenerate path
 
 ```text
-[all five attacker batches contain zero candidates]
-$ falsiq attack request --case <CASE> --attacker <each class>
-$ falsiq attack prepare --case <CASE> --attacker <each class> --file <raw response>
-$ falsiq attack assemble --case <CASE> --round 1 <five batch files>
+[all five reviewer batches contain zero candidates]
+$ falsiq review request --case <CASE> --reviewer <each class>
+$ falsiq review prepare --case <CASE> --reviewer <each class> --file <raw response>
+$ falsiq review assemble --case <CASE> --round 1 <five batch files>
 {"candidates":[],"selected":[],...}
-[attack add and collide are not called; derivation begins]
+[review add and collide are not called; derivation begins]
 ```

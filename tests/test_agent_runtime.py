@@ -33,7 +33,7 @@ FIXTURE_AGENT = Path(__file__).parent / "fixtures" / "fake_agent.py"
 
 def request(*, payload: dict[str, object] | None = None) -> AgentRequest:
     return AgentRequest(
-        role="attacker.boundary",
+        role="reviewer.boundary",
         request_id="request-1",
         payload=payload or {"case_id": "case-1", "round": 1},
     )
@@ -50,7 +50,7 @@ def write_allowlist(path: Path) -> Path:
                 "schema_version": 1,
                 "task_ids": ["task-1"],
                 "case_ids": ["case-1"],
-                "models": {"attacker.boundary": "provider/model-2026-07-15"},
+                "models": {"reviewer.boundary": "provider/model-2026-07-15"},
             }
         ),
         encoding="utf-8",
@@ -61,7 +61,7 @@ def write_allowlist(path: Path) -> Path:
 def test_protocol_models_are_strict_and_require_json_values() -> None:
     with pytest.raises(ValidationError):
         AgentRequest(
-            role="attacker.boundary",
+            role="reviewer.boundary",
             request_id="request-1",
             payload={},
             unrecognized=True,
@@ -77,9 +77,9 @@ def test_protocol_models_are_strict_and_require_json_values() -> None:
 @pytest.mark.parametrize(
     "document",
     [
-        '{"role":"attacker","role":"selector","request_id":"r1","payload":{}}\n',
-        '{"role":"attacker","request_id":"r1","payload":{"value":NaN}}\n',
-        '{"role":"attacker","request_id":"r1","payload":{},"credential":"secret"}\n',
+        '{"role":"reviewer","role":"selector","request_id":"r1","payload":{}}\n',
+        '{"role":"reviewer","request_id":"r1","payload":{"value":NaN}}\n',
+        '{"role":"reviewer","request_id":"r1","payload":{},"credential":"secret"}\n',
     ],
 )
 def test_request_parser_rejects_noncanonical_or_extra_data_without_echoing_it(
@@ -106,7 +106,7 @@ def test_invoke_agent_round_trips_one_jsonl_request_and_captures_transcript(
         request_id="request-1",
         response={
             "payload": {"unicode": "café", "nested": [True, None, 3]},
-            "role": "attacker.boundary",
+            "role": "reviewer.boundary",
         },
     )
     transcript = load_transcript(transcript_path)
@@ -340,7 +340,7 @@ def test_transcript_requires_matching_request_and_response_ids(tmp_path: Path) -
             {
                 "schema_version": 1,
                 "request": {
-                    "role": "attacker.boundary",
+                    "role": "reviewer.boundary",
                     "request_id": "request-1",
                     "payload": {},
                 },
@@ -522,7 +522,7 @@ def test_live_authorization_rejects_symlinked_and_malformed_allowlists(tmp_path:
     [
         {"task_ids": ["task-1", "task-1"]},
         {"case_ids": ["case-1", "case-1"]},
-        {"models": {"attacker.boundary": "provider/model-latest"}},
+        {"models": {"reviewer.boundary": "provider/model-latest"}},
     ],
 )
 def test_live_allowlist_rejects_ambiguous_approval_data(
@@ -532,7 +532,7 @@ def test_live_allowlist_rejects_ambiguous_approval_data(
         "schema_version": 1,
         "task_ids": ["task-1"],
         "case_ids": ["case-1"],
-        "models": {"attacker.boundary": "provider/model-2026-07-15"},
+        "models": {"reviewer.boundary": "provider/model-2026-07-15"},
         **change,
     }
     allowlist = tmp_path / "allowlist.json"

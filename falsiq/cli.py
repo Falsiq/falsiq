@@ -23,16 +23,17 @@ from .derive import (
     write_derivation_request,
 )
 from .facts import AttackFact, IntentFact, RulingFact, new_ulid, utc_timestamp
-from .ledger import FalsiqError, Ledger, LedgerValidationError, canonical_fact_json
+from .ledger import FalsiqError, Ledger, LedgerValidationError
+from .review_language import neutralize_review_state
 from .rulings import RulingCommandError, build_outcome, build_ruling_batch
 from .sandbox import SandboxError, create_sandbox, reap_sandboxes, sandbox_json
 from .workflow import (
-    ATTACK_CLASSES,
+    REVIEW_CLASSES,
     assemble_attack_round,
-    build_attack_request,
-    canonical_attack_request_json,
+    build_review_request,
+    canonical_review_request_json,
     canonical_selection_json,
-    prepare_attack_batch,
+    prepare_review_batch,
     ready_brief,
 )
 
@@ -60,8 +61,16 @@ def _intent_command(args: argparse.Namespace) -> int:
 
 def _log_command(args: argparse.Namespace) -> int:
     ledger = Ledger.open()
-    for fact in ledger.log(kind=args.kind, case_id=args.case_id):
-        print(canonical_fact_json(fact))
+    kind = "attack" if args.kind == "review" else args.kind
+    for fact in ledger.log(kind=kind, case_id=args.case_id):
+        print(
+            json.dumps(
+                neutralize_review_state(fact.model_dump(mode="json")),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
     return 0
 
 
@@ -73,7 +82,7 @@ def _render_case(case: dict[str, object]) -> list[str]:
             if isinstance(intent, dict):
                 lines.append(f"Intent: {intent['text']}")
     rulings = case["rulings"]
-    open_attacks = case["open_attacks"]
+    open_reviews = case["open_reviews"]
     lines.append(f"Rulings: {len(rulings) if isinstance(rulings, list) else 0}")
     if isinstance(rulings, list):
         for ruling in rulings:
@@ -88,7 +97,7 @@ def _render_case(case: dict[str, object]) -> list[str]:
                 continue
             noun = "fact" if age_facts == 1 else "facts"
             lines.append(f"Ruling {ruling_id}: {verdict} ({age_facts} later case {noun})")
-    lines.append(f"Open attacks: {len(open_attacks) if isinstance(open_attacks, list) else 0}")
+    lines.append(f"Open reviews: {len(open_reviews) if isinstance(open_reviews, list) else 0}")
     return lines
 
 
@@ -103,7 +112,7 @@ def _render_state(state: dict[str, object]) -> str:
 
 
 def _state_command(args: argparse.Namespace) -> int:
-    state = Ledger.open().state(args.case_id)
+    state = neutralize_review_state(Ledger.open().state(args.case_id))
     if args.json:
         print(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True))
     else:
@@ -111,7 +120,7 @@ def _state_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _attack_add_command(args: argparse.Namespace) -> int:
+def _review_add_command(args: argparse.Namespace) -> int:
     envelope = SelectionEnvelope.model_validate_json(args.file.read_bytes())
     ledger = Ledger.open()
     facts = ledger.read()
@@ -140,23 +149,23 @@ def _attack_add_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _attack_assemble_command(args: argparse.Namespace) -> int:
+def _review_assemble_command(args: argparse.Namespace) -> int:
     envelope = assemble_attack_round(args.case_id, args.round_number, args.batches)
     print(canonical_selection_json(envelope))
     return 0
 
 
-def _attack_request_command(args: argparse.Namespace) -> int:
-    request = build_attack_request(Ledger.open(), args.case_id, args.attacker)
-    print(canonical_attack_request_json(request))
+def _review_request_command(args: argparse.Namespace) -> int:
+    request = build_review_request(Ledger.open(), args.case_id, args.reviewer)
+    print(canonical_review_request_json(request))
     return 0
 
 
-def _attack_prepare_command(args: argparse.Namespace) -> int:
-    batch, degraded = prepare_attack_batch(args.case_id, args.attacker, args.file)
+def _review_prepare_command(args: argparse.Namespace) -> int:
+    batch, degraded = prepare_review_batch(args.case_id, args.reviewer, args.file)
     if degraded:
         print(
-            f"warning: invalid {args.attacker} attacker output was replaced by an empty batch",
+            f"warning: invalid {args.reviewer} reviewer output was replaced by an empty batch",
             file=sys.stderr,
         )
     print(batch.model_dump_json())
@@ -168,7 +177,7 @@ def _collide_command(args: argparse.Namespace) -> int:
     state = ledger.state(args.case_id)
     open_values = state.get("open_attacks")
     if not isinstance(open_values, list) or not open_values:
-        raise LedgerValidationError(f"case {args.case_id} has no open attacks")
+        raise LedgerValidationError(f"case {args.case_id} has no open reviews")
     attacks = [AttackFact.model_validate(value) for value in open_values]
     path = write_collision_file(ledger.root, args.case_id, attacks)
     print(path)
@@ -180,7 +189,7 @@ def _rule_command(args: argparse.Namespace) -> int:
     facts = ledger.read()
     batch = build_ruling_batch(
         facts,
-        attack_id=args.attack_id,
+        attack_id=args.review_id,
         verdict=args.verdict,
         choice=args.choice,
         amendment_text=args.text,
@@ -201,7 +210,7 @@ def _outcome_command(args: argparse.Namespace) -> int:
         case_id=args.case_id,
         otype=args.otype,
         trace=args.trace,
-        attack_id=args.attack_id,
+        attack_id=args.review_id,
         notes=args.notes,
     )
     ledger_head = facts[-1].id if facts else None
@@ -211,7 +220,7 @@ def _outcome_command(args: argparse.Namespace) -> int:
 
 
 def _sandbox_new_command(args: argparse.Namespace) -> int:
-    sandbox = create_sandbox(Path.cwd(), args.attack_id)
+    sandbox = create_sandbox(Path.cwd(), args.review_id)
     print(sandbox_json(sandbox))
     return 0
 
@@ -282,7 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     log_parser = commands.add_parser("log", help="print canonical ledger facts")
     log_parser.add_argument(
         "--kind",
-        choices=("intent", "attack", "ruling", "derivation", "outcome"),
+        choices=("intent", "review", "ruling", "derivation", "outcome"),
     )
     log_parser.add_argument("--case", dest="case_id")
     log_parser.set_defaults(handler=_log_command)
@@ -292,47 +301,47 @@ def build_parser() -> argparse.ArgumentParser:
     state_parser.add_argument("--case", dest="case_id")
     state_parser.set_defaults(handler=_state_command)
 
-    attack_parser = commands.add_parser("attack", help="validate and append attack rounds")
-    attack_commands = attack_parser.add_subparsers(dest="attack_command", required=True)
-    attack_request_parser = attack_commands.add_parser(
+    review_parser = commands.add_parser("review", help="validate and append review rounds")
+    review_commands = review_parser.add_subparsers(dest="review_command", required=True)
+    review_request_parser = review_commands.add_parser(
         "request",
-        help="emit a self-contained request for one attacker",
+        help="emit a self-contained request for one reviewer",
     )
-    attack_request_parser.add_argument("--case", dest="case_id", required=True)
-    attack_request_parser.add_argument("--attacker", choices=tuple(ATTACK_CLASSES), required=True)
-    attack_request_parser.set_defaults(handler=_attack_request_command)
-    attack_prepare_parser = attack_commands.add_parser(
+    review_request_parser.add_argument("--case", dest="case_id", required=True)
+    review_request_parser.add_argument("--reviewer", choices=tuple(REVIEW_CLASSES), required=True)
+    review_request_parser.set_defaults(handler=_review_request_command)
+    review_prepare_parser = review_commands.add_parser(
         "prepare",
-        help="validate attacker output with an empty-batch fallback",
+        help="validate reviewer output with an empty-batch fallback",
     )
-    attack_prepare_parser.add_argument("--case", dest="case_id", required=True)
-    attack_prepare_parser.add_argument("--attacker", choices=tuple(ATTACK_CLASSES), required=True)
-    attack_prepare_parser.add_argument("-f", "--file", type=Path, required=True)
-    attack_prepare_parser.set_defaults(handler=_attack_prepare_command)
-    attack_assemble_parser = attack_commands.add_parser(
+    review_prepare_parser.add_argument("--case", dest="case_id", required=True)
+    review_prepare_parser.add_argument("--reviewer", choices=tuple(REVIEW_CLASSES), required=True)
+    review_prepare_parser.add_argument("-f", "--file", type=Path, required=True)
+    review_prepare_parser.set_defaults(handler=_review_prepare_command)
+    review_assemble_parser = review_commands.add_parser(
         "assemble",
-        help="assemble five attacker batches into a deterministic round",
+        help="assemble five reviewer batches into a deterministic round",
     )
-    attack_assemble_parser.add_argument("--case", dest="case_id", required=True)
-    attack_assemble_parser.add_argument(
+    review_assemble_parser.add_argument("--case", dest="case_id", required=True)
+    review_assemble_parser.add_argument(
         "--round",
         dest="round_number",
         type=int,
         choices=(1, 2),
         required=True,
     )
-    attack_assemble_parser.add_argument("batches", nargs="*", type=Path)
-    attack_assemble_parser.set_defaults(handler=_attack_assemble_command)
-    attack_add_parser = attack_commands.add_parser("add", help="append a selector-approved round")
-    attack_add_parser.add_argument("-f", "--file", type=Path, required=True)
-    attack_add_parser.set_defaults(handler=_attack_add_command)
+    review_assemble_parser.add_argument("batches", nargs="*", type=Path)
+    review_assemble_parser.set_defaults(handler=_review_assemble_command)
+    review_add_parser = review_commands.add_parser("add", help="append a selector-approved round")
+    review_add_parser.add_argument("-f", "--file", type=Path, required=True)
+    review_add_parser.set_defaults(handler=_review_add_command)
 
-    collide_parser = commands.add_parser("collide", help="render a case's open attacks")
+    collide_parser = commands.add_parser("collide", help="render a case's open reviews")
     collide_parser.add_argument("--case", dest="case_id", required=True)
     collide_parser.set_defaults(handler=_collide_command)
 
-    rule_parser = commands.add_parser("rule", help="record or supersede an attack ruling")
-    rule_parser.add_argument("attack_id")
+    rule_parser = commands.add_parser("rule", help="record or supersede a review ruling")
+    rule_parser.add_argument("review_id")
     rule_parser.add_argument(
         "verdict",
         choices=("intended", "forbidden", "dont_care", "amend"),
@@ -350,14 +359,14 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("elicited", "missable", "novel", "n/a"),
         required=True,
     )
-    outcome_parser.add_argument("--attack", dest="attack_id")
+    outcome_parser.add_argument("--review", dest="review_id")
     outcome_parser.add_argument("--notes", default="")
     outcome_parser.set_defaults(handler=_outcome_command)
 
     sandbox_parser = commands.add_parser("sandbox", help="manage disposable prototype worktrees")
     sandbox_commands = sandbox_parser.add_subparsers(dest="sandbox_command", required=True)
     sandbox_new = sandbox_commands.add_parser("new", help="create a prototype worktree")
-    sandbox_new.add_argument("attack_id", nargs="?", metavar="ID")
+    sandbox_new.add_argument("review_id", nargs="?", metavar="ID")
     sandbox_new.set_defaults(handler=_sandbox_new_command)
     sandbox_reap = sandbox_commands.add_parser("reap", help="remove managed prototype worktrees")
     sandbox_reap.add_argument(

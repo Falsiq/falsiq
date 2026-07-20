@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 
 from falsiq.score import (
-    AttackEvaluation,
     LatentRequirement,
     RequirementScore,
+    ReviewEvaluation,
     interaction_cost,
     licensed_discretion_rate,
     paired_bootstrap_interval,
@@ -22,23 +22,23 @@ REQUIREMENTS = (
 
 
 def test_recall_is_severity_weighted_and_cumulative_by_round() -> None:
-    attacks = (
-        AttackEvaluation("A1", round=1, requirement_ids=frozenset({"LR1"})),
-        AttackEvaluation("A2", round=1),
-        AttackEvaluation("A3", round=2, requirement_ids=frozenset({"LR3"})),
+    reviews = (
+        ReviewEvaluation("A1", round=1, requirement_ids=frozenset({"LR1"})),
+        ReviewEvaluation("A2", round=1),
+        ReviewEvaluation("A3", round=2, requirement_ids=frozenset({"LR3"})),
     )
 
-    assert severity_weighted_recall(REQUIREMENTS, attacks, through_round=1) == pytest.approx(3 / 7)
-    assert severity_weighted_recall(REQUIREMENTS, attacks, through_round=2) == pytest.approx(4 / 7)
+    assert severity_weighted_recall(REQUIREMENTS, reviews, through_round=1) == pytest.approx(3 / 7)
+    assert severity_weighted_recall(REQUIREMENTS, reviews, through_round=2) == pytest.approx(4 / 7)
 
 
 def test_duplicate_mappings_count_each_requirement_once() -> None:
-    attacks = (
-        AttackEvaluation("A1", round=1, requirement_ids=frozenset({"LR1"})),
-        AttackEvaluation("A2", round=2, requirement_ids=frozenset({"LR1"})),
+    reviews = (
+        ReviewEvaluation("A1", round=1, requirement_ids=frozenset({"LR1"})),
+        ReviewEvaluation("A2", round=2, requirement_ids=frozenset({"LR1"})),
     )
 
-    assert severity_weighted_recall(REQUIREMENTS, attacks, through_round=2) == pytest.approx(3 / 7)
+    assert severity_weighted_recall(REQUIREMENTS, reviews, through_round=2) == pytest.approx(3 / 7)
 
 
 def test_controls_have_no_recall_denominator() -> None:
@@ -46,23 +46,23 @@ def test_controls_have_no_recall_denominator() -> None:
 
 
 def test_unknown_requirement_mapping_is_rejected() -> None:
-    attacks = (AttackEvaluation("A1", round=1, requirement_ids=frozenset({"LR404"})),)
+    reviews = (ReviewEvaluation("A1", round=1, requirement_ids=frozenset({"LR404"})),)
 
     with pytest.raises(ValueError, match="unknown latent requirement"):
-        severity_weighted_recall(REQUIREMENTS, attacks, through_round=1)
+        severity_weighted_recall(REQUIREMENTS, reviews, through_round=1)
 
 
 def test_waste_discretion_and_interaction_metrics() -> None:
-    attacks = (
-        AttackEvaluation("A1", round=1, requirement_ids=frozenset({"LR1"})),
-        AttackEvaluation("A2", round=1),
-        AttackEvaluation("A3", round=1, amended=True),
-        AttackEvaluation("A4", round=2, verdict="dont_care"),
+    reviews = (
+        ReviewEvaluation("A1", round=1, requirement_ids=frozenset({"LR1"})),
+        ReviewEvaluation("A2", round=1),
+        ReviewEvaluation("A3", round=1, amended=True),
+        ReviewEvaluation("A4", round=2, verdict="dont_care"),
     )
 
-    assert waste_rate(attacks) == pytest.approx(0.5)
-    assert licensed_discretion_rate(attacks) == pytest.approx(0.25)
-    assert interaction_cost(attacks) == 4
+    assert waste_rate(reviews) == pytest.approx(0.5)
+    assert licensed_discretion_rate(reviews) == pytest.approx(0.25)
+    assert interaction_cost(reviews) == 4
     assert waste_rate(()) == 0.0
     assert licensed_discretion_rate(()) == 0.0
 

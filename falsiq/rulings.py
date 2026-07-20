@@ -23,7 +23,7 @@ def _attack_by_id(facts: Sequence[Fact], attack_id: str) -> AttackFact:
     for fact in facts:
         if isinstance(fact, AttackFact) and fact.id == attack_id:
             return fact
-    raise RulingCommandError(f"unknown attack: {attack_id}")
+    raise RulingCommandError(f"unknown review: {attack_id}")
 
 
 def _active_intent_ids(facts: Sequence[Fact], case_id: str) -> set[str]:
@@ -83,11 +83,11 @@ def build_ruling_batch(
     selected_intent = intent_id
     if selected_intent is None:
         if len(active_targets) != 1:
-            raise RulingCommandError("amendment requires exactly one active attack target")
+            raise RulingCommandError("amendment requires exactly one active review target")
         selected_intent = next(iter(active_targets))
     if selected_intent not in active_targets:
         raise RulingCommandError(
-            f"--intent must name an active attack target; received {selected_intent}"
+            f"--intent must name an active review target; received {selected_intent}"
         )
 
     amended = IntentFact(
@@ -113,7 +113,7 @@ def build_outcome(
     id_factory: Callable[[], str] = new_ulid,
     timestamp_factory: Callable[[], str] = utc_timestamp,
 ) -> OutcomeFact:
-    """Build one outcome after checking its case and optional attack reference."""
+    """Build one outcome after checking its case and optional review reference."""
 
     case_exists = any(
         isinstance(fact, IntentFact) and fact.source == "user" and fact.id == case_id
@@ -124,7 +124,7 @@ def build_outcome(
     if attack_id is not None:
         attack = _attack_by_id(facts, attack_id)
         if attack.case_id != case_id:
-            raise RulingCommandError("outcome attack must belong to the same case")
+            raise RulingCommandError("outcome review must belong to the same case")
     return OutcomeFact(
         id=id_factory(),
         ts=timestamp_factory(),

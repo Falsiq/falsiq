@@ -26,16 +26,16 @@ class LatentRequirement:
 
 
 @dataclass(frozen=True, slots=True)
-class AttackEvaluation:
-    attack_id: str
+class ReviewEvaluation:
+    review_id: str
     round: int
     requirement_ids: frozenset[str] = frozenset()
     amended: bool = False
     verdict: Verdict | None = None
 
     def __post_init__(self) -> None:
-        if not self.attack_id:
-            raise ValueError("attack ID must not be empty")
+        if not self.review_id:
+            raise ValueError("review ID must not be empty")
         if self.round < 1:
             raise ValueError("round must be at least 1")
 
@@ -73,7 +73,7 @@ def _requirement_weights(requirements: tuple[LatentRequirement, ...]) -> dict[st
 
 def severity_weighted_recall(
     requirements: tuple[LatentRequirement, ...],
-    attacks: tuple[AttackEvaluation, ...],
+    reviews: tuple[ReviewEvaluation, ...],
     *,
     through_round: int,
 ) -> float | None:
@@ -82,8 +82,8 @@ def severity_weighted_recall(
     if through_round < 1:
         raise ValueError("through_round must be at least 1")
     weights = _requirement_weights(requirements)
-    for attack in attacks:
-        unknown = attack.requirement_ids.difference(weights)
+    for review in reviews:
+        unknown = review.requirement_ids.difference(weights)
         if unknown:
             raise ValueError(f"unknown latent requirement mapping: {sorted(unknown)[0]}")
     denominator = sum(weights.values())
@@ -91,30 +91,30 @@ def severity_weighted_recall(
         return None
     elicited = {
         requirement_id
-        for attack in attacks
-        if attack.round <= through_round
-        for requirement_id in attack.requirement_ids
+        for review in reviews
+        if review.round <= through_round
+        for requirement_id in review.requirement_ids
     }
     return sum(weights[requirement_id] for requirement_id in elicited) / denominator
 
 
-def waste_rate(attacks: tuple[AttackEvaluation, ...]) -> float:
-    """Return the fraction of attacks that mapped to no LR and caused no amendment."""
+def waste_rate(reviews: tuple[ReviewEvaluation, ...]) -> float:
+    """Return the fraction of reviews that mapped to no LR and caused no amendment."""
 
-    if not attacks:
+    if not reviews:
         return 0.0
-    wasted = sum(not attack.requirement_ids and not attack.amended for attack in attacks)
-    return wasted / len(attacks)
+    wasted = sum(not review.requirement_ids and not review.amended for review in reviews)
+    return wasted / len(reviews)
 
 
-def licensed_discretion_rate(attacks: tuple[AttackEvaluation, ...]) -> float:
-    if not attacks:
+def licensed_discretion_rate(reviews: tuple[ReviewEvaluation, ...]) -> float:
+    if not reviews:
         return 0.0
-    return sum(attack.verdict == "dont_care" for attack in attacks) / len(attacks)
+    return sum(review.verdict == "dont_care" for review in reviews) / len(reviews)
 
 
-def interaction_cost(attacks: tuple[AttackEvaluation, ...]) -> int:
-    return len(attacks)
+def interaction_cost(reviews: tuple[ReviewEvaluation, ...]) -> int:
+    return len(reviews)
 
 
 def weighted_conformance(

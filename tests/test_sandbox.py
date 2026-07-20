@@ -639,9 +639,9 @@ def test_cli_creates_and_reaps_sandbox(
     created_output = capsys.readouterr()
     assert created_output.err == ""
     assert created_output.out == (
-        '{"attack_id":"01J00000000000000000000000",'
-        '"branch":"falsiq/proto/01J00000000000000000000000",'
-        '"path":".falsiq/sandbox/01J00000000000000000000000"}\n'
+        '{"branch":"falsiq/proto/01J00000000000000000000000",'
+        '"path":".falsiq/sandbox/01J00000000000000000000000",'
+        '"review_id":"01J00000000000000000000000"}\n'
     )
 
     assert main(["sandbox", "reap"]) == 0
@@ -685,7 +685,7 @@ def test_cli_allocates_an_id_when_omitted(
     output = capsys.readouterr()
     assert output.err == ""
     assert json.loads(output.out) == {
-        "attack_id": SECOND_ATTACK_ID,
+        "review_id": SECOND_ATTACK_ID,
         "branch": f"falsiq/proto/{SECOND_ATTACK_ID}",
         "path": f".falsiq/sandbox/{SECOND_ATTACK_ID}",
     }

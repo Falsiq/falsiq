@@ -15,7 +15,7 @@ def encoded_request() -> str:
     return (
         json.dumps(
             {
-                "role": "attacker.boundary",
+                "role": "reviewer.boundary",
                 "request_id": "request-1",
                 "payload": {"case_id": "case-1"},
             },
@@ -37,7 +37,7 @@ def write_allowlist(path: Path) -> None:
                 "schema_version": 1,
                 "task_ids": [],
                 "case_ids": ["case-1"],
-                "models": {"attacker.boundary": "provider/model-2026-07-15"},
+                "models": {"reviewer.boundary": "provider/model-2026-07-15"},
             }
         ),
         encoding="utf-8",

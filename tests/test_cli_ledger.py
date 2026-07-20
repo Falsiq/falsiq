@@ -5,7 +5,8 @@ import subprocess
 from pathlib import Path
 
 from falsiq.cli import _render_state, main
-from falsiq.facts import new_ulid
+from falsiq.facts import Artifact, AttackFact, IntentFact, new_ulid
+from falsiq.ledger import Ledger
 
 
 def git_repo(path: Path) -> Path:
@@ -46,7 +47,7 @@ def test_init_intent_log_and_state_commands(tmp_path: Path, monkeypatch, capsys)
     assert state_output.err == ""
     assert state["case_id"] == case_id
     assert state["intents"][0]["text"] == text
-    assert state["open_attacks"] == []
+    assert state["open_reviews"] == []
 
 
 def test_state_human_output_is_stable_and_readable(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -67,7 +68,7 @@ def test_state_human_output_is_stable_and_readable(tmp_path: Path, monkeypatch, 
     assert first == second
     assert f"Case {case_id}\n" in first
     assert "Intent: Ship it\n" in first
-    assert "Open attacks: 0\n" in first
+    assert "Open reviews: 0\n" in first
 
 
 def test_state_human_output_surfaces_active_ruling_age() -> None:
@@ -82,11 +83,55 @@ def test_state_human_output_surfaces_active_ruling_age() -> None:
                     "age_facts": 3,
                 }
             ],
-            "open_attacks": [],
+            "open_reviews": [],
         }
     )
 
     assert "Ruling 01ARZ3NDEKTSV4RRFFQ69G5FAX: forbidden (3 later case facts)" in rendered
+
+
+def test_review_log_and_state_translate_the_legacy_ledger_vocabulary(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo = git_repo(tmp_path / "repo")
+    ledger = Ledger.initialize(repo)
+    case_id = new_ulid(timestamp_ms=1, randomness=b"\0" * 10)
+    intent = IntentFact(
+        id=case_id,
+        ts="2026-07-20T12:00:00.000Z",
+        case_id=case_id,
+        text="Choose empty-input behavior",
+        source="user",
+    )
+    review = AttackFact(
+        id=new_ulid(timestamp_ms=2, randomness=b"\0" * 10),
+        ts="2026-07-20T12:00:00.000Z",
+        case_id=case_id,
+        klass="boundary",
+        targets=[case_id],
+        artifact=Artifact(type="scenario", body="The input is empty."),
+        settles=["empty-input behavior"],
+        silent_settles=["empty-input behavior"],
+        hate_scenario="The default surprises the user.",
+        render_cost="trivial",
+        round=1,
+    )
+    ledger.append_batch([intent, review])
+    monkeypatch.chdir(repo)
+
+    assert main(["log", "--kind", "review", "--case", case_id]) == 0
+    logged_output = capsys.readouterr()
+    assert logged_output.err == ""
+    assert json.loads(logged_output.out)["risk_scenario"] == "The default surprises the user."
+    assert "attack" not in logged_output.out.casefold()
+    assert "hate" not in logged_output.out.casefold()
+
+    assert main(["state", "--json", "--case", case_id]) == 0
+    state_output = capsys.readouterr()
+    assert state_output.err == ""
+    assert json.loads(state_output.out)["open_reviews"][0]["kind"] == "review"
+    assert "attack" not in state_output.out.casefold()
+    assert "hate" not in state_output.out.casefold()
 
 
 def test_cli_errors_are_concise_and_do_not_mutate_the_ledger(

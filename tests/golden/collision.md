@@ -2,11 +2,11 @@
 
 - Case: <code>01ARZ3NDEKTSV4RRFFQ69G5FAV</code>
 - Round: 1
-- Attacks: 5
+- Reviews: 5
 
-Rule every attack with exactly one command shown below.
+Rule every review with exactly one command shown below.
 
-## A1 [boundary]
+## R1 [boundary]
 
 **Settles**
 
@@ -35,7 +35,7 @@ exit 0
 exit 2: error
 </pre>
 
-### Hate scenario
+### Risk scenario
 
 <pre>
 bad outcome 0
@@ -52,7 +52,7 @@ falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAX dont_care
 falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAX amend --text "<replacement intent>"
 ```
 
-## A2 [consequence]
+## R2 [consequence]
 
 **Settles**
 
@@ -64,7 +64,7 @@ falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAX amend --text "<replacement intent>"
 On day 30, the cache serves stale data.
 </pre>
 
-### Hate scenario
+### Risk scenario
 
 <pre>
 bad outcome 1
@@ -79,7 +79,7 @@ falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAY dont_care
 falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAY amend --text "<replacement intent>"
 ```
 
-## A3 [prototype]
+## R3 [prototype]
 
 **Settles**
 
@@ -89,7 +89,7 @@ falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAY amend --text "<replacement intent>"
 
 [Open artifact](../../../cases/01ARZ3NDEKTSV4RRFFQ69G5FAV/collisions/prototype/transcript.md) — <code>cases/01ARZ3NDEKTSV4RRFFQ69G5FAV/collisions/prototype/transcript.md</code>
 
-### Hate scenario
+### Risk scenario
 
 <pre>
 bad outcome 2
@@ -104,7 +104,7 @@ falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAZ dont_care
 falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAZ amend --text "<replacement intent>"
 ```
 
-## A4 [conflict]
+## R4 [conflict]
 
 **Settles**
 
@@ -117,7 +117,7 @@ falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FAZ amend --text "<replacement intent>"
 + requested behavior
 </pre>
 
-### Hate scenario
+### Risk scenario
 
 <pre>
 bad outcome 3
@@ -132,7 +132,7 @@ falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FB0 dont_care
 falsiq rule 01ARZ3NDEKTSV4RRFFQ69G5FB0 amend --text "<replacement intent>"
 ```
 
-## A5 [omission]
+## R5 [omission]
 
 **Settles**
 
@@ -145,7 +145,7 @@ $ tool --empty
 error: empty input
 </pre>
 
-### Hate scenario
+### Risk scenario
 
 <pre>
 bad outcome 4

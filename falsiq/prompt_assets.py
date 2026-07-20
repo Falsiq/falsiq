@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from importlib.resources import files
 
-ATTACK_PROMPT_NAMES = {
-    "boundary": "attacker_boundary.md",
-    "consequence": "attacker_consequence.md",
-    "prototype": "attacker_prototype.md",
-    "conflict": "attacker_conflict.md",
-    "omission": "attacker_omission.md",
+REVIEW_PROMPT_NAMES = {
+    "boundary": "reviewer_boundary.md",
+    "consequence": "reviewer_consequence.md",
+    "prototype": "reviewer_prototype.md",
+    "conflict": "reviewer_conflict.md",
+    "omission": "reviewer_omission.md",
 }
 
 
@@ -20,10 +20,10 @@ def load_production_prompt(name: str) -> str:
         filename = "deriver.md"
     else:
         try:
-            filename = ATTACK_PROMPT_NAMES[name]
+            filename = REVIEW_PROMPT_NAMES[name]
         except KeyError:
             raise ValueError(f"unknown production prompt: {name}") from None
     return files("falsiq").joinpath("prompts", filename).read_text(encoding="utf-8")
 
 
-__all__ = ["ATTACK_PROMPT_NAMES", "load_production_prompt"]
+__all__ = ["REVIEW_PROMPT_NAMES", "load_production_prompt"]

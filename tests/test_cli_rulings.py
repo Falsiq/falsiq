@@ -211,7 +211,7 @@ def test_multi_target_amend_requires_explicit_active_intent(
     before_inactive = ledger.path.read_bytes()
     assert main(["rule", inactive_only.id, "amend", "--text", "Cannot replace inactive root"]) == 2
     inactive_only_output = capsys.readouterr()
-    assert "exactly one active attack target" in inactive_only_output.err
+    assert "exactly one active review target" in inactive_only_output.err
     assert ledger.path.read_bytes() == before_inactive
 
     multi = add_attack(ledger, amended, targets=[root.id, amended.id])
@@ -239,7 +239,7 @@ def test_multi_target_amend_requires_explicit_active_intent(
     )
     inactive = capsys.readouterr()
     assert inactive.out == ""
-    assert "active attack target" in inactive.err
+    assert "active review target" in inactive.err
     assert ledger.path.read_bytes() == before
 
     assert (
@@ -272,7 +272,7 @@ def test_rule_rejects_unknown_attack_without_writing(tmp_path: Path, monkeypatch
     assert main(["rule", new_ulid(), "intended"]) == 2
     output = capsys.readouterr()
     assert output.out == ""
-    assert "unknown attack" in output.err
+    assert "unknown review" in output.err
     assert ledger.path.read_bytes() == before
 
 
@@ -309,7 +309,7 @@ def test_outcome_records_every_valid_trace_combination(
         "  Observed verbatim.  ",
     ]
     if with_attack:
-        arguments.extend(["--attack", attack.id])
+        arguments.extend(["--review", attack.id])
 
     assert main(arguments) == 0
     output = capsys.readouterr()
@@ -347,7 +347,7 @@ def test_outcome_rejects_invalid_schema_combinations_without_writes(
     before = ledger.path.read_bytes()
     arguments = ["outcome", otype, "--case", intent.case_id, "--trace", trace]
     if with_attack:
-        arguments.extend(["--attack", attack.id])
+        arguments.extend(["--review", attack.id])
 
     assert main(arguments) == 2
     output = capsys.readouterr()
@@ -381,7 +381,7 @@ def test_outcome_enforces_case_and_attack_references(tmp_path: Path, monkeypatch
                 second.id,
                 "--trace",
                 "elicited",
-                "--attack",
+                "--review",
                 first_attack.id,
             ]
         )
@@ -400,14 +400,14 @@ def test_outcome_enforces_case_and_attack_references(tmp_path: Path, monkeypatch
                 second.id,
                 "--trace",
                 "elicited",
-                "--attack",
+                "--review",
                 new_ulid(),
             ]
         )
         == 2
     )
     unknown_attack = capsys.readouterr()
-    assert "unknown attack" in unknown_attack.err
+    assert "unknown review" in unknown_attack.err
     assert ledger.path.read_bytes() == before
 
     assert main(["outcome", "accepted", "--case", new_ulid(), "--trace", "n/a"]) == 2

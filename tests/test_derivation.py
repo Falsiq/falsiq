@@ -150,7 +150,7 @@ def test_derivation_request_is_strict_deterministic_and_prompt_keyed(tmp_path: P
     assert first.prompt_sha256 == deriver_prompt_hash()
     assert len(first.request_id) == 64
     assert first.response_schema == DeriverResponse.model_json_schema()
-    assert first.state["open_attacks"] == []
+    assert first.state["open_reviews"] == []
     strict_payload = first.model_dump(mode="json") | {"unexpected": True}
     with pytest.raises(ValidationError):
         DerivationRequest.model_validate(strict_payload)
@@ -162,7 +162,7 @@ def test_derivation_request_refuses_open_attacks(tmp_path: Path) -> None:
     intent = root_intent()
     ledger.append_batch([intent, attack(2, intent)])
 
-    with pytest.raises(DerivationError, match="open attacks"):
+    with pytest.raises(DerivationError, match="open reviews"):
         build_derivation_request(ledger.read(), intent.case_id)
 
 
@@ -595,7 +595,7 @@ def test_derive_cli_refuses_open_attacks_without_writing_request(
     assert main(["derive", "--case", intent.case_id]) == 2
     output = capsys.readouterr()
     assert output.out == ""
-    assert "open attacks" in output.err
+    assert "open reviews" in output.err
     assert not (repo / ".falsiq" / "cases" / intent.case_id / "derived").exists()
 
 
@@ -1033,7 +1033,7 @@ def test_submit_rejects_open_attack_even_with_a_preexisting_response(
     assert main(["derive", "--case", intent.case_id, "--submit", str(path)]) == 2
     output = capsys.readouterr()
     assert output.out == ""
-    assert "open attacks" in output.err
+    assert "open reviews" in output.err
 
 
 def test_cli_rejects_malformed_or_extra_response_without_traceback(

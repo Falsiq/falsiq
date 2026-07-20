@@ -57,9 +57,9 @@ from .corpus import (
     read_private_holdout_task,
 )
 from .score import (
-    AttackEvaluation,
     BootstrapInterval,
     RequirementScore,
+    ReviewEvaluation,
     interaction_cost,
     licensed_discretion_rate,
     paired_bootstrap_interval,
@@ -70,15 +70,15 @@ from .score import (
 from .score import LatentRequirement as MetricRequirement
 
 SCHEMA_VERSION = 1
-ATTACKER_ROLES = (
-    "attacker.boundary",
-    "attacker.consequence",
-    "attacker.prototype",
-    "attacker.conflict",
-    "attacker.omission",
+REVIEWER_ROLES = (
+    "reviewer.boundary",
+    "reviewer.consequence",
+    "reviewer.prototype",
+    "reviewer.conflict",
+    "reviewer.omission",
 )
 AGENT_ROLES = (
-    *ATTACKER_ROLES,
+    *REVIEWER_ROLES,
     "selector",
     "principal",
     "scorer",
@@ -143,17 +143,17 @@ class EvaluationArtifact(ContractModel):
         return self
 
 
-class AttackCandidate(ContractModel):
-    attack_id: StableToken
+class ReviewCandidate(ContractModel):
+    review_id: StableToken
     klass: Literal["boundary", "consequence", "prototype", "conflict", "omission"]
     artifact: EvaluationArtifact
     settles: list[NonblankText] = Field(min_length=1)
     silent_settles: list[NonblankText] = Field(default_factory=list)
-    hate_scenario: NonblankText
+    risk_scenario: NonblankText
     render_cost: Literal["trivial", "cheap", "expensive"]
 
     @model_validator(mode="after")
-    def decision_lists_are_sets(self) -> AttackCandidate:
+    def decision_lists_are_sets(self) -> ReviewCandidate:
         validate_consequence_artifact(
             klass=self.klass,
             artifact_type=self.artifact.type,
@@ -169,7 +169,7 @@ class AttackCandidate(ContractModel):
 
 
 class PublicRuling(ContractModel):
-    attack_id: StableToken
+    review_id: StableToken
     round: int = Field(ge=1, le=2)
     verdict: Literal["intended", "forbidden", "dont_care", "amend"]
     choice: StableToken | None = None
@@ -188,7 +188,7 @@ class PublicRuling(ContractModel):
         return self
 
 
-class AttackerPayload(ContractModel):
+class ReviewerPayload(ContractModel):
     task: PublicTask
     round: int = Field(ge=1, le=2)
     prior_rulings: list[PublicRuling]
@@ -197,13 +197,13 @@ class AttackerPayload(ContractModel):
 class SelectorPayload(ContractModel):
     task: PublicTask
     round: int = Field(ge=1, le=2)
-    candidates: list[AttackCandidate]
+    candidates: list[ReviewCandidate]
 
 
 class PrincipalPayload(ContractModel):
     task: EvalTask
     round: int = Field(ge=1, le=2)
-    attack: AttackCandidate
+    review: ReviewCandidate
     interactions_used: int = Field(ge=0)
     interaction_limit: int = Field(ge=1)
 
@@ -381,20 +381,20 @@ class JudgeResponse(ContractModel):
         return self
 
 
-class AttackerResponse(ContractModel):
+class ReviewerResponse(ContractModel):
     request_id: StableToken
-    attacks: list[AttackCandidate] = Field(max_length=4)
+    reviews: list[ReviewCandidate] = Field(max_length=4)
 
 
 class SelectorResponse(ContractModel):
     request_id: StableToken
-    selected_attack_ids: list[StableToken] = Field(max_length=MAX_INTERACTIONS_PER_ROUND)
+    selected_review_ids: list[StableToken] = Field(max_length=MAX_INTERACTIONS_PER_ROUND)
     rationale: NonblankText
 
     @model_validator(mode="after")
     def selections_are_unique(self) -> SelectorResponse:
-        if len(self.selected_attack_ids) != len(set(self.selected_attack_ids)):
-            raise ValueError("selected attack IDs must be unique")
+        if len(self.selected_review_ids) != len(set(self.selected_review_ids)):
+            raise ValueError("selected review IDs must be unique")
         return self
 
 
@@ -455,7 +455,7 @@ class ScorerResponse(ContractModel):
 
 
 PayloadModel = (
-    AttackerPayload
+    ReviewerPayload
     | SelectorPayload
     | PrincipalPayload
     | ScorerPayload
@@ -465,7 +465,7 @@ PayloadModel = (
     | JudgePayload
 )
 ResponseModel = (
-    AttackerResponse
+    ReviewerResponse
     | SelectorResponse
     | PrincipalRuling
     | ScorerResponse
@@ -476,7 +476,7 @@ ResponseModel = (
 )
 
 _PAYLOAD_MODELS: dict[str, type[ContractModel]] = {
-    **{role: AttackerPayload for role in ATTACKER_ROLES},
+    **{role: ReviewerPayload for role in REVIEWER_ROLES},
     "selector": SelectorPayload,
     "principal": PrincipalPayload,
     "scorer": ScorerPayload,
@@ -486,7 +486,7 @@ _PAYLOAD_MODELS: dict[str, type[ContractModel]] = {
     "judge": JudgePayload,
 }
 _RESPONSE_MODELS: dict[str, type[BaseModel]] = {
-    **{role: AttackerResponse for role in ATTACKER_ROLES},
+    **{role: ReviewerResponse for role in REVIEWER_ROLES},
     "selector": SelectorResponse,
     "principal": PrincipalRuling,
     "scorer": ScorerResponse,
@@ -675,7 +675,7 @@ class HiddenTestRunner(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class _ConditionOutcome:
-    evaluations: tuple[AttackEvaluation, ...]
+    evaluations: tuple[ReviewEvaluation, ...]
     handoff: str = ""
 
 
@@ -688,7 +688,7 @@ class _TaskOutcome:
 
 @dataclass(frozen=True, slots=True)
 class _FalsiqDecision:
-    attack: AttackCandidate
+    review: ReviewCandidate
     ruling: PublicRuling
 
 
@@ -748,18 +748,18 @@ def _detect_answer_leaks(
     )
 
 
-def _select_attacks(
-    candidates: tuple[AttackCandidate, ...],
+def _select_reviews(
+    candidates: tuple[ReviewCandidate, ...],
     selection: SelectorResponse,
-) -> tuple[AttackCandidate, ...]:
-    by_id = {candidate.attack_id: candidate for candidate in candidates}
+) -> tuple[ReviewCandidate, ...]:
+    by_id = {candidate.review_id: candidate for candidate in candidates}
     if len(by_id) != len(candidates):
-        raise EvaluationProtocolError("attackers returned duplicate attack IDs")
-    unknown = set(selection.selected_attack_ids).difference(by_id)
+        raise EvaluationProtocolError("reviewers returned duplicate review IDs")
+    unknown = set(selection.selected_review_ids).difference(by_id)
     if unknown:
-        raise EvaluationProtocolError(f"selector referenced unknown attack {sorted(unknown)[0]}")
+        raise EvaluationProtocolError(f"selector referenced unknown review {sorted(unknown)[0]}")
 
-    def valid(values: tuple[AttackCandidate, ...]) -> bool:
+    def valid(values: tuple[ReviewCandidate, ...]) -> bool:
         classes = [candidate.klass for candidate in values]
         return (
             (len(values) <= 1 or len(set(classes)) >= 2)
@@ -767,16 +767,16 @@ def _select_attacks(
             and classes.count("omission") <= 2
         )
 
-    def score(candidate: AttackCandidate) -> Fraction:
+    def score(candidate: ReviewCandidate) -> Fraction:
         costs = {"trivial": 1, "cheap": 3, "expensive": 9}
         return Fraction(
             len(candidate.settles) + len(candidate.silent_settles),
             costs[candidate.render_cost],
         )
 
-    def digest(candidate: AttackCandidate) -> str:
+    def digest(candidate: ReviewCandidate) -> str:
         content = candidate.model_dump(mode="json")
-        del content["attack_id"]
+        del content["review_id"]
         canonical = json.dumps(
             content,
             ensure_ascii=False,
@@ -786,14 +786,14 @@ def _select_attacks(
         ).encode()
         return hashlib.sha256(canonical).hexdigest()
 
-    digests = {candidate.attack_id: digest(candidate) for candidate in candidates}
+    digests = {candidate.review_id: digest(candidate) for candidate in candidates}
     if len(set(digests.values())) != len(candidates):
-        raise EvaluationProtocolError("attackers returned duplicate candidate content")
-    feasible: list[tuple[AttackCandidate, ...]] = []
+        raise EvaluationProtocolError("reviewers returned duplicate candidate content")
+    feasible: list[tuple[ReviewCandidate, ...]] = []
     for size in range(1, min(MAX_INTERACTIONS_PER_ROUND, len(candidates)) + 1):
         feasible.extend(values for values in combinations(candidates, size) if valid(values))
     if not feasible:
-        expected: tuple[AttackCandidate, ...] = ()
+        expected: tuple[ReviewCandidate, ...] = ()
     else:
         maximum_size = max(len(values) for values in feasible)
         largest = [values for values in feasible if len(values) == maximum_size]
@@ -805,11 +805,11 @@ def _select_attacks(
         ]
         chosen = min(
             highest,
-            key=lambda values: tuple(sorted(digests[item.attack_id] for item in values)),
+            key=lambda values: tuple(sorted(digests[item.review_id] for item in values)),
         )
-        expected = tuple(sorted(chosen, key=lambda item: (-score(item), digests[item.attack_id])))
-    expected_ids = [candidate.attack_id for candidate in expected]
-    if selection.selected_attack_ids != expected_ids:
+        expected = tuple(sorted(chosen, key=lambda item: (-score(item), digests[item.review_id])))
+    expected_ids = [candidate.review_id for candidate in expected]
+    if selection.selected_review_ids != expected_ids:
         raise EvaluationProtocolError(
             "selector output does not match the deterministic selection policy"
         )
@@ -863,7 +863,7 @@ def _score_interactions(
     if set(response.waste_interaction_ids) != expected_waste:
         raise EvaluationProtocolError("scorer waste list disagrees with its mappings")
     evaluations = tuple(
-        AttackEvaluation(
+        ReviewEvaluation(
             interaction.interaction_id,
             round=interaction.round,
             requirement_ids=frozenset(by_mapping[interaction.interaction_id].requirement_ids),
@@ -887,25 +887,25 @@ def _inline_code(value: str) -> str:
 
 
 def _render_eval_ruling_evidence(decision: _FalsiqDecision) -> list[str]:
-    attack = decision.attack
+    review = decision.review
     ruling = decision.ruling
     choice = f"`{ruling.choice}`" if ruling.choice is not None else "—"
     lines = [
-        f"### Attack `{attack.attack_id}`",
+        f"### Review `{review.review_id}`",
         "",
         f"- Round: {ruling.round}",
-        f"- Class: `{attack.klass}`",
+        f"- Class: `{review.klass}`",
         f"- Verdict: `{ruling.verdict}`",
         f"- Choice: {choice}",
         "- Settles:",
-        *[f"  - {_inline_code(item)}" for item in attack.settles],
+        *[f"  - {_inline_code(item)}" for item in review.settles],
         "",
-        f"#### Artifact (`{attack.artifact.type}`)",
+        f"#### Artifact (`{review.artifact.type}`)",
         "",
-        *_verbatim_block(attack.artifact.body),
+        *_verbatim_block(review.artifact.body),
         "",
     ]
-    for option in attack.artifact.options:
+    for option in review.artifact.options:
         lines.extend(
             [
                 f"##### Choice `{option.key}`",
@@ -916,9 +916,9 @@ def _render_eval_ruling_evidence(decision: _FalsiqDecision) -> list[str]:
         )
     lines.extend(
         [
-            "#### Hate scenario",
+            "#### Risk scenario",
             "",
-            *_verbatim_block(attack.hate_scenario),
+            *_verbatim_block(review.risk_scenario),
             "",
         ]
     )
@@ -945,7 +945,7 @@ def _render_falsiq_handoff(
         assert active.ruling.amendment_text is not None
         lines.extend(
             [
-                f"### Active amendment from attack `{active.attack.attack_id}`",
+                f"### Active amendment from review `{active.review.review_id}`",
                 "",
                 *_verbatim_block(active.ruling.amendment_text),
                 "",
@@ -965,7 +965,7 @@ def _render_falsiq_handoff(
         [
             "## Rulings",
             "",
-            "| Attack | Round | Class | Verdict | Choice |",
+            "| Review | Round | Class | Verdict | Choice |",
             "| --- | --- | --- | --- | --- |",
         ]
     )
@@ -973,11 +973,11 @@ def _render_falsiq_handoff(
         lines.extend(["", "- No collisions were selected.", ""])
     else:
         for decision in decisions:
-            attack = decision.attack
+            review = decision.review
             ruling = decision.ruling
             choice = f"`{ruling.choice}`" if ruling.choice is not None else "—"
             lines.append(
-                f"| `{attack.attack_id}` | {ruling.round} | {attack.klass} | "
+                f"| `{review.review_id}` | {ruling.round} | {review.klass} | "
                 f"{ruling.verdict} | {choice} |"
             )
         lines.append("")
@@ -988,7 +988,7 @@ def _render_falsiq_handoff(
         status = "active" if index == len(amendments) - 1 else "superseded"
         lines.extend(
             [
-                f"### Amendment ruling for attack `{decision.attack.attack_id}` "
+                f"### Amendment ruling for review `{decision.review.review_id}` "
                 f"(verbatim; {status})",
                 "",
                 *_verbatim_block(amendment),
@@ -1012,11 +1012,11 @@ def _render_falsiq_handoff(
             choice = decision.ruling.choice
             assert choice is not None
             option = next(
-                option for option in decision.attack.artifact.options if option.key == choice
+                option for option in decision.review.artifact.options if option.key == choice
             )
             lines.extend(
                 [
-                    f"### Attack `{decision.attack.attack_id}`",
+                    f"### Review `{decision.review.review_id}`",
                     "",
                     f"- Acceptance tests must reject choice `{choice}` when "
                     "repository-level tests can express this observable behavior; "
@@ -1034,10 +1034,10 @@ def _render_falsiq_handoff(
         lines.extend(["- None recorded.", ""])
     else:
         for decision in discretion:
-            for settled in decision.attack.settles:
+            for settled in decision.review.settles:
                 lines.append(
                     f"- {_inline_code(settled)} — licensed by `dont_care` ruling "
-                    f"for attack `{decision.attack.attack_id}`."
+                    f"for review `{decision.review.review_id}`."
                 )
         lines.append("")
     return "\n".join(lines) + "\n"
@@ -1073,15 +1073,15 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
     prior_rulings: list[PublicRuling] = []
     interactions: list[ScoringInteraction] = []
     decisions: list[_FalsiqDecision] = []
-    seen_attack_ids: set[str] = set()
+    seen_review_ids: set[str] = set()
     interaction_limit = task.annoyance_budget * MAX_INTERACTIONS_PER_ROUND
     for round_number in range(1, task.annoyance_budget + 1):
-        payload = AttackerPayload(
+        payload = ReviewerPayload(
             task=task.public_projection(),
             round=round_number,
             prior_rulings=prior_rulings,
         )
-        with ThreadPoolExecutor(max_workers=len(ATTACKER_ROLES)) as executor:
+        with ThreadPoolExecutor(max_workers=len(REVIEWER_ROLES)) as executor:
             futures = [
                 executor.submit(
                     _invoke,
@@ -1089,21 +1089,21 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
                     role,
                     _request_id(task.task_id, "f", role, f"r{round_number}"),
                     payload,
-                    AttackerResponse,
+                    ReviewerResponse,
                 )
-                for role in ATTACKER_ROLES
+                for role in REVIEWER_ROLES
             ]
-            attacker_responses = [future.result() for future in futures]
-        candidates: list[AttackCandidate] = []
-        for role, response in zip(ATTACKER_ROLES, attacker_responses, strict=True):
-            expected_class = role.removeprefix("attacker.")
-            for attack in response.attacks:
-                if attack.klass != expected_class:
-                    raise EvaluationProtocolError(f"{role} returned attack class {attack.klass}")
-                if attack.attack_id in seen_attack_ids:
-                    raise EvaluationProtocolError("attack IDs must be unique across rounds")
-                seen_attack_ids.add(attack.attack_id)
-                candidates.append(attack)
+            reviewer_responses = [future.result() for future in futures]
+        candidates: list[ReviewCandidate] = []
+        for role, response in zip(REVIEWER_ROLES, reviewer_responses, strict=True):
+            expected_class = role.removeprefix("reviewer.")
+            for review in response.reviews:
+                if review.klass != expected_class:
+                    raise EvaluationProtocolError(f"{role} returned review class {review.klass}")
+                if review.review_id in seen_review_ids:
+                    raise EvaluationProtocolError("review IDs must be unique across rounds")
+                seen_review_ids.add(review.review_id)
+                candidates.append(review)
         if not candidates:
             break
         selector_id = _request_id(task.task_id, "f", "selector", f"r{round_number}")
@@ -1118,9 +1118,9 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
             ),
             SelectorResponse,
         )
-        selected = _select_attacks(tuple(candidates), selection)
+        selected = _select_reviews(tuple(candidates), selection)
         round_verdicts: list[str] = []
-        for attack in selected:
+        for review in selected:
             principal_id = _request_id(
                 task.task_id,
                 "f",
@@ -1134,7 +1134,7 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
                 PrincipalPayload(
                     task=task,
                     round=round_number,
-                    attack=attack,
+                    review=review,
                     interactions_used=len(interactions),
                     interaction_limit=interaction_limit,
                 ),
@@ -1148,23 +1148,23 @@ def _run_falsiq(task: EvalTask, runtime: EvaluationAgentRuntime) -> _ConditionOu
             leaks = detect_principal_leaks(task, ruling)
             if leaks:
                 raise EvaluationLeakageError(f"principal leaked hidden requirement {leaks[0]}")
-            option_keys = {option.key for option in attack.artifact.options}
+            option_keys = {option.key for option in review.artifact.options}
             if ruling.choice is not None and ruling.choice not in option_keys:
-                raise EvaluationProtocolError("principal chose an option absent from the attack")
+                raise EvaluationProtocolError("principal chose an option absent from the review")
             public_ruling = PublicRuling(
-                attack_id=attack.attack_id,
+                review_id=review.review_id,
                 round=round_number,
                 verdict=ruling.verdict,
                 choice=ruling.choice,
                 amendment_text=ruling.amendment_text,
             )
             prior_rulings.append(public_ruling)
-            decisions.append(_FalsiqDecision(attack=attack, ruling=public_ruling))
+            decisions.append(_FalsiqDecision(review=review, ruling=public_ruling))
             interactions.append(
                 ScoringInteraction(
-                    interaction_id=attack.attack_id,
+                    interaction_id=review.review_id,
                     round=round_number,
-                    artifact=attack.artifact,
+                    artifact=review.artifact,
                     ruling=public_ruling,
                 )
             )
@@ -1307,7 +1307,7 @@ def _condition_metrics(
 
 
 def _all_intended_round_rate(
-    evaluations: tuple[AttackEvaluation, ...],
+    evaluations: tuple[ReviewEvaluation, ...],
 ) -> float:
     """Flag sycophantic Falsiq rounds; baseline interactions have no verdicts."""
 
@@ -1318,7 +1318,7 @@ def _all_intended_round_rate(
 
 
 def _all_intended_round_flags(
-    evaluations: tuple[AttackEvaluation, ...],
+    evaluations: tuple[ReviewEvaluation, ...],
 ) -> tuple[bool, ...]:
     rounds = sorted({evaluation.round for evaluation in evaluations})
     return tuple(
@@ -1349,9 +1349,9 @@ def _aggregate_condition(
             total_weight += sum(weights.values())
             elicited = {
                 requirement_id
-                for attack in result.evaluations
-                if attack.round <= round_number
-                for requirement_id in attack.requirement_ids
+                for review in result.evaluations
+                if review.round <= round_number
+                for requirement_id in review.requirement_ids
             }
             elicited_weight += sum(weights[requirement_id] for requirement_id in elicited)
         return None if total_weight == 0 else elicited_weight / total_weight
