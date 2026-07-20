@@ -62,6 +62,23 @@ of modifying target dependencies. In its source checkout, the checked-in
 symlinks remain the normal discovery paths; do not replace them with generated
 second copies.
 
+## End-to-end demos
+
+Two short, standalone tutorials show the intent-to-guard workflow in disposable
+Git repositories:
+
+- [Precise intent with no selected reviews](docs/demos/no_review_handoff.md)
+  demonstrates the valid empty-selection path through derivation and guard.
+- [Collision resolved by an amendment](docs/demos/collision_amendment.md)
+  demonstrates the human stop, replacement intent, second-round gate,
+  derivation, and guard.
+
+Each tutorial contains one self-contained command block and its stable expected
+output. The test suite extracts and runs those exact blocks, so CLI changes
+cannot silently leave the walkthroughs stale. The inline responses are an
+offline teaching replay; production usage still requires fresh external
+reviewers and a fresh external deriver as specified by the agent skill.
+
 ## Executable agents
 
 Agent execution is a separate `falsiq-agent` program so the `falsiq` plumbing
