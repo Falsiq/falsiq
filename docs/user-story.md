@@ -105,15 +105,23 @@ $ falsiq log --case "$CASE"           # canonical durable facts for this case
 
 ### 2. External attackers propose; the CLI selects
 
-The external skill launches exactly five fresh agents as one parallel group:
-boundary, consequence, prototype, conflict, and omission. Four receive the
-case state; the conflict attacker receives global state so it can compare the
-new request with earlier cases. Their strict candidate batches live in a
-private temporary directory outside the worktree.
+The external skill first asks the CLI for one self-contained request per attack
+class. Each request contains the canonical role prompt, relevant ledger state,
+the exact response schema, and valid empty and populated examples. Boundary,
+consequence, prototype, and omission receive case state; conflict receives
+global state so it can compare the new request with earlier cases. The skill
+then launches exactly five fresh agents as one parallel group. Their raw and
+prepared candidate batches live in a private temporary directory outside the
+worktree.
 
 The commands below are normally issued by the skill, not typed by the user:
 
 ```console
+$ falsiq attack request --case "$CASE" --attacker boundary \
+    > "$TMP/boundary-request.json"
+$ falsiq attack prepare --case "$CASE" --attacker boundary \
+    --file "$TMP/boundary-raw.json" > "$TMP/boundary.json"
+# Repeat request and prepare for consequence, prototype, conflict, and omission.
 $ falsiq attack assemble --case "$CASE" --round 1 \
     "$TMP/boundary.json" "$TMP/consequence.json" \
     "$TMP/prototype.json" "$TMP/conflict.json" \
@@ -121,12 +129,18 @@ $ falsiq attack assemble --case "$CASE" --round 1 \
 $ falsiq attack add --file "$TMP/round.json"
 ```
 
-`attack assemble` requires one valid batch from every class, normalizes the
+`attack prepare` validates one role's output as strict JSON with no duplicate
+keys, checks the case and class, and normalizes valid output. Invalid output is
+replaced by only that role's canonical empty batch with a warning; because a
+role may honestly find zero attacks, fabricating a repair would add less safety
+than this explicit degradation. The remaining roles and round continue.
+
+`attack assemble` requires one prepared batch from every class, normalizes the
 candidates, and computes the only policy-valid selection. It can select up to
 three candidates and recomputes the selection when `attack add` validates the
 envelope. Editing the `selected` array or substituting an agent's preference is
-rejected. Only selected attacks become ledger facts; raw batches and the round
-envelope remain disposable.
+rejected. Only selected attacks become ledger facts; raw batches, prepared
+batches, and the round envelope remain disposable.
 
 ### 3. A collision creates a real human stop
 
@@ -209,11 +223,12 @@ The request is stored at:
 .falsiq/cases/<case-id>/derived/<ledger-head>/request.json
 ```
 
-The skill reads that regular file completely and gives the exact JSON to one
-fresh external deriver. The deriver cannot rewrite intent, add rulings, or add
-agent discretion. It may return exactly one forbidden-test entry per active
-`forbidden` ruling: either inert pytest-shaped requirements scaffolding or a
-reason the behavior cannot be expressed as a repository-level test.
+The request contains the canonical deriver instructions and exact response
+schema. The skill reads that regular file completely and gives the exact JSON
+to one fresh external deriver. The deriver cannot rewrite intent, add rulings,
+or add agent discretion. It may return exactly one forbidden-test entry per
+active `forbidden` ruling: either inert pytest-shaped requirements scaffolding
+or a reason the behavior cannot be expressed as a repository-level test.
 
 The skill writes the strict response to a private temporary file and submits
 it:
@@ -434,7 +449,8 @@ around the barrier.
 | `STOP -- FALSIQ CLI REQUIRED`, `CLI UNUSABLE`, or `CLI VERSION MISMATCH` | Install or repair the declared compatible tool outside the target project, then rerun the prerequisite. The skill must not do this silently. |
 | `not inside a Git repository` | Move into the intended Git worktree or initialize Git before running Falsiq. |
 | Ledger not initialized | Run `falsiq init` once in the target. Do not create ledger files by hand. |
-| Malformed batch, wrong case, duplicate class, symlink batch, or edited selection | Discard the temporary round and obtain fresh strict output from all five attackers. No partial attack batch should be appended. |
+| Malformed attacker output, wrong case or role, duplicate keys, or unsafe response file | `attack prepare` warns and emits that role's canonical empty batch. Continue the round with the other four prepared batches; never fabricate a candidate. |
+| Duplicate prepared class, missing prepared batch, or edited selection | Discard the temporary round and regenerate its deterministic inputs. No partial attack batch should be appended. |
 | `STOP -- HUMAN RULING REQUIRED` from the guard | One or more attacks remain open. Inspect `falsiq state --json --case "$CASE"`, present the unresolved collision, and wait for explicit rulings. |
 | Round two is rejected | Round one is missing, still open, already duplicated, or lacks an active `amend`/`forbidden` verdict. Follow the state-derived gate; do not force a round. |
 | Derivation request or response is rejected | Resolve open attacks or ask a fresh external deriver to copy the request identity exactly and return only the allowed schema. Never weaken validation or hand-edit the request. |

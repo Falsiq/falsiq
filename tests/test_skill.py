@@ -26,10 +26,15 @@ from falsiq.facts import (
 )
 from falsiq.ledger import Ledger
 from falsiq.workflow import (
+    ATTACK_CLASSES,
     AssemblyError,
+    AttackGenerationRequest,
     GuardError,
     assemble_attack_round,
+    build_attack_request,
+    canonical_attack_request_json,
     canonical_selection_json,
+    prepare_attack_batch,
     ready_brief,
 )
 
@@ -37,8 +42,7 @@ ROOT = Path(__file__).parents[1]
 ASSEMBLE = ROOT / "skill" / "scripts" / "assemble_round.py"
 GUARD = ROOT / "skill" / "scripts" / "guard_open_attacks.py"
 REQUIRE_CLI = ROOT / "skill" / "scripts" / "require_cli.sh"
-ATTACKERS = ("boundary", "consequence", "prototype", "conflict", "omission")
-PROMPT_NAMES = tuple(f"attacker_{attacker}.md" for attacker in ATTACKERS) + ("deriver.md",)
+ATTACKERS = ATTACK_CLASSES
 
 
 def git_repo(path: Path) -> Path:
@@ -170,6 +174,125 @@ def test_assemble_round_requires_exactly_one_batch_per_attacker(tmp_path: Path) 
     assert "exactly five" in missing.stderr
     assert duplicate.returncode == 2
     assert "duplicate attacker" in duplicate.stderr
+
+
+@pytest.mark.parametrize("attacker", ATTACKERS)
+def test_attack_request_carries_the_exact_schema_and_valid_examples(
+    tmp_path: Path,
+    attacker: str,
+) -> None:
+    repo = git_repo(tmp_path / "repo")
+    ledger = Ledger.initialize(repo)
+    case_id = make_id(1)
+    ledger.append(
+        IntentFact(
+            id=case_id,
+            ts="2026-07-15T12:00:00.000Z",
+            case_id=case_id,
+            text="Add bounded retries",
+            source="user",
+        )
+    )
+    request = build_attack_request(ledger, case_id, attacker)
+
+    assert request.attacker == attacker
+    assert request.response_schema == AttackCandidateBatch.model_json_schema()
+    if attacker == "conflict":
+        assert "cases" in request.state
+    else:
+        assert request.state["case_id"] == case_id
+    assert "Return only one JSON object" in request.instructions
+    assert "Do not wrap it in Markdown" in request.instructions
+    assert "response_schema" in request.instructions
+    assert len(request.examples) == 2
+    parsed_examples = [AttackCandidateBatch.model_validate(example) for example in request.examples]
+    assert parsed_examples[0].candidates == []
+    assert parsed_examples[1].candidates
+    assert all(example.case_id == case_id for example in parsed_examples)
+    assert all(example.attacker == attacker for example in parsed_examples)
+    assert (
+        AttackGenerationRequest.model_validate_json(canonical_attack_request_json(request))
+        == request
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"{not json",
+        b"{}",
+        b'{"case_id":"duplicate","case_id":"wins"}',
+        b'{"schema_version":1,"case_id":"01ARZ3NDEKTSV4RRFFQ69G5FAV",'
+        b'"attacker":"boundary","candidates":[],"commentary":"extra"}',
+    ],
+)
+def test_prepare_attack_batch_replaces_invalid_agent_output_with_an_empty_batch(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    path = tmp_path / "attacker-output.json"
+    path.write_bytes(payload)
+    case_id = make_id(1)
+
+    batch, degraded = prepare_attack_batch(case_id, "boundary", path)
+
+    assert degraded is True
+    assert batch == AttackCandidateBatch(
+        case_id=case_id,
+        attacker="boundary",
+        candidates=[],
+    )
+
+
+def test_prepare_attack_batch_keeps_valid_agent_output(tmp_path: Path) -> None:
+    case_id = make_id(1)
+    expected = AttackCandidateBatch(
+        case_id=case_id,
+        attacker="boundary",
+        candidates=[candidate(case_id, "boundary")],
+    )
+    path = tmp_path / "attacker-output.json"
+    path.write_text(expected.model_dump_json(), encoding="utf-8")
+
+    batch, degraded = prepare_attack_batch(case_id, "boundary", path)
+
+    assert degraded is False
+    assert batch == expected
+
+
+@pytest.mark.parametrize("wrong_field", ["case_id", "attacker"])
+def test_prepare_attack_batch_rejects_valid_schema_for_the_wrong_request_identity(
+    tmp_path: Path,
+    wrong_field: str,
+) -> None:
+    case_id = make_id(1)
+    payload = AttackCandidateBatch(
+        case_id=make_id(2) if wrong_field == "case_id" else case_id,
+        attacker="omission" if wrong_field == "attacker" else "boundary",
+        candidates=[],
+    )
+    path = tmp_path / "wrong-identity.json"
+    path.write_text(payload.model_dump_json(), encoding="utf-8")
+
+    batch, degraded = prepare_attack_batch(case_id, "boundary", path)
+
+    assert degraded is True
+    assert batch.case_id == case_id
+    assert batch.attacker == "boundary"
+    assert batch.candidates == []
+
+
+def test_prepare_attack_batch_contains_unsafe_response_files(tmp_path: Path) -> None:
+    case_id = make_id(1)
+    target = tmp_path / "target.json"
+    target.write_text("{}", encoding="utf-8")
+    symlink = tmp_path / "output.json"
+    symlink.symlink_to(target.name)
+
+    symlink_batch, symlink_degraded = prepare_attack_batch(case_id, "boundary", symlink)
+
+    assert symlink_degraded is True
+    assert symlink_batch.candidates == []
 
 
 def test_assemble_round_rejects_case_mismatch_and_symlink_input(tmp_path: Path) -> None:
@@ -407,7 +530,7 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
         "skip falsiq",
         "outcome abandoned --case",
         "--trace n/a",
-        "exactly five fresh attackers in parallel",
+        "exactly five fresh attackers",
         "At most two rounds",
         "IMPLEMENTATION_BRIEF.md",
         "Read the regular request file",
@@ -416,6 +539,9 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
         "STOP -- FALSIQ CLI REQUIRED",
         "falsiq==0.1.0",
         "falsiq attack assemble",
+        "falsiq attack request",
+        "falsiq attack prepare",
+        "disclose the degraded coverage",
         "falsiq guard --case",
         "untrusted model output",
         "Inspect every generated test stub completely",
@@ -428,6 +554,7 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
     assert all(phrase in skill for phrase in required_skill_phrases)
     assert "uv run" not in skill
     assert "${CLAUDE_PROJECT_DIR}/agents/" not in skill
+    assert "${SKILL_DIR}/references/" not in skill
 
     complete_barrier = (
         "STOP -- HUMAN RULING REQUIRED\n"
@@ -473,14 +600,16 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
     assert positions == sorted(positions)
 
 
-def test_skill_bundles_every_runtime_prompt_from_the_canonical_agents() -> None:
+def test_production_prompts_have_one_packaged_source_of_truth() -> None:
     skill = (ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
+    prompt_dir = ROOT / "falsiq" / "prompts"
+    prompt_names = tuple(f"attacker_{attacker}.md" for attacker in ATTACKERS) + ("deriver.md",)
 
-    for prompt_name in PROMPT_NAMES:
-        canonical = ROOT / "agents" / prompt_name
-        bundled = ROOT / "skill" / "references" / prompt_name
-        assert bundled.read_bytes() == canonical.read_bytes()
-        assert f"${{SKILL_DIR}}/references/{prompt_name}" in skill
+    assert {path.name for path in prompt_dir.glob("*.md")} == set(prompt_names)
+    assert not (ROOT / "skill" / "references").exists()
+    for prompt_name in prompt_names:
+        assert not (ROOT / "agents" / prompt_name).exists()
+        assert f"${{SKILL_DIR}}/references/{prompt_name}" not in skill
 
 
 def test_cli_prerequisite_fails_closed_with_actionable_missing_executable(
@@ -545,13 +674,43 @@ def test_installed_console_workflow_is_portable_to_a_repo_without_project_files(
     placed_skill = target / ".claude" / "skills" / "falsiq"
     shutil.copytree(ROOT / "skill", placed_skill)
     assert (placed_skill / "SKILL.md").is_file()
-    assert (placed_skill / "references" / "deriver.md").is_file()
+    assert not (placed_skill / "references").exists()
 
     initialized = run_installed_cli("init", cwd=target)
     assert initialized.returncode == 0, initialized.stderr
     opened = run_installed_cli("intent", "Add bounded retries", cwd=target)
     assert opened.returncode == 0, opened.stderr
     case_id = opened.stdout.strip()
+
+    requested_attacker = run_installed_cli(
+        "attack",
+        "request",
+        "--case",
+        case_id,
+        "--attacker",
+        "boundary",
+        cwd=target,
+    )
+    assert requested_attacker.returncode == 0, requested_attacker.stderr
+    attacker_request = json.loads(requested_attacker.stdout)
+    assert attacker_request["response_schema"] == AttackCandidateBatch.model_json_schema()
+
+    malformed_path = tmp_path / "malformed-attacker.json"
+    malformed_path.write_text("not json", encoding="utf-8")
+    prepared_attacker = run_installed_cli(
+        "attack",
+        "prepare",
+        "--case",
+        case_id,
+        "--attacker",
+        "boundary",
+        "--file",
+        malformed_path,
+        cwd=target,
+    )
+    assert prepared_attacker.returncode == 0
+    assert "replaced by an empty batch" in prepared_attacker.stderr
+    assert json.loads(prepared_attacker.stdout)["candidates"] == []
 
     batches_dir = tmp_path / "private-batches"
     batches_dir.mkdir()

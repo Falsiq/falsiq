@@ -73,12 +73,15 @@ under `.falsiq/cases/<case-id>/`. Facts are never updated or deleted. Amendments
 and re-rulings append new facts that supersede older ones, and current state is
 derived by replaying the complete validated sequence.
 
-Attacker output and selection envelopes are disposable protocol values. The
-installed workflow reads exactly one batch for each attack class, computes
-canonical content digests and rational scores, and persists only the selected
-attacks as an expected-head batch. Collision Markdown renders the ledger-owned
-artifacts as forced choices. Only explicit human rulings may cross the next
-boundary; no agent may infer or auto-submit one.
+Attacker requests and selection envelopes are disposable protocol values. The
+installed CLI emits each request with its canonical prompt, relevant state,
+exact response schema, and valid examples. It normalizes valid responses and
+turns malformed output into only that role's canonical empty batch, then reads
+exactly one prepared batch for each attack class, computes canonical content
+digests and rational scores, and persists only the selected attacks as an
+expected-head batch. Collision Markdown renders the ledger-owned artifacts as
+forced choices. Only explicit human rulings may cross the next boundary; no
+agent may infer or auto-submit one.
 
 Derivation is a two-step external handoff. `falsiq derive --case CASE` writes a
 canonical request bound to the current ledger head, prompt hash, and response
@@ -107,9 +110,10 @@ payload, and a non-CI environment. The evaluation runner itself is replay-only.
 | `falsiq/attacks.py` | Transient attack schemas, content identities, deterministic selection, round gates, durable materialization, and collision rendering |
 | `falsiq/rulings.py` | Deterministic ruling, amendment, re-ruling, and outcome batches |
 | `falsiq/derive.py` | Head-bound request construction, deriver-response validation, inert scaffold grammar, brief rendering, publication, digest commitments, locking, and rollback |
-| `falsiq/workflow.py` | Installed-skill helpers behind `falsiq attack assemble` and `falsiq guard` |
+| `falsiq/workflow.py` | Installed-skill helpers behind attacker request/preparation/assembly and `falsiq guard` |
 | `falsiq/sandbox.py` | Manifest-owned disposable Git worktrees and conservative cleanup |
 | `falsiq/agent_runtime.py` | Provider-neutral executable-agent protocol, exact replay, bounded process capture, private transcripts, and live authorization |
+| `falsiq/prompts/` | Single packaged source for production attacker and deriver prompts |
 | `falsiq/benchmark.py` | Versioned hidden-intent task contracts, salted task identity, and principal leakage checks |
 | `falsiq/corpus.py` | Human-approval gates, deterministic holdout selection, redacted manifests, private-first release, access logging, and verified private reads |
 | `falsiq/score.py` | Pure recall, waste, discretion, conformance, and paired-bootstrap calculations |
@@ -197,9 +201,9 @@ uv build --out-dir "$DIST"
 unzip -Z1 "$DIST"/*.whl
 ```
 
-The wheel should contain the `falsiq` package and distribution metadata, not
-tests, prompts, evaluation corpora, `.claude/`, `.agents/`, or the skill
-directory.
+The wheel should contain the `falsiq` package (including `falsiq/prompts/`) and
+distribution metadata, not tests, evaluation-only prompts, evaluation corpora,
+`.claude/`, `.agents/`, or the skill directory.
 
 ### Test by boundary
 
@@ -306,10 +310,11 @@ platforms that cannot provide them.
 
 Prompt and workflow files are executable contracts, not informal prose.
 
-- Canonical production prompts live in `agents/attacker_*.md` and
-  `agents/deriver.md`. The copies in `skill/references/` must remain byte-for-byte
-  identical. Change the canonical file, copy the exact bytes, and run
-  `tests/test_skill.py`.
+- Canonical production prompts live only in `falsiq/prompts/` and ship as package
+  data. `falsiq attack request` combines them with the Pydantic-generated schema
+  and role-bound examples; the derivation request embeds its prompt and schema.
+  Do not add mirrors under `agents/` or `skill/`. Run `tests/test_skill.py` and
+  `tests/test_derivation.py` after prompt changes.
 - Canonical evaluation prompts also live in `agents/`. Keep their frontmatter
   contract version and strict JSON instructions aligned with the Pydantic models
   in `benchmark.py` and `evaluation.py`; run `tests/test_eval_prompts.py` and the

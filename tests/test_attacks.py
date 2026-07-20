@@ -530,10 +530,11 @@ def test_collision_renderer_rejects_empty_mixed_or_duplicate_batches() -> None:
 def test_prompts_define_all_attackers_and_machine_checked_selector_contract() -> None:
     root = Path(__file__).parents[1]
     for klass in ("boundary", "consequence", "prototype", "conflict", "omission"):
-        prompt = (root / "agents" / f"attacker_{klass}.md").read_text()
+        prompt = (root / "falsiq" / "prompts" / f"attacker_{klass}.md").read_text()
+        normalized = " ".join(prompt.split())
         assert f"`{klass}`" in prompt
-        assert "0 to 4" in prompt
-        assert "concrete artifact" in prompt
+        assert "0 to 4" in normalized
+        assert "concrete artifact" in normalized
         assert "hate_scenario" in prompt
         assert "settles" in prompt
 

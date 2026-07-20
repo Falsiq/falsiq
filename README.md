@@ -5,8 +5,9 @@ agent implements a change. It records the user's intent and rulings in an
 append-only JSONL ledger, then derives disposable implementation briefs from
 that durable record.
 
-The Python CLI is deterministic and never invokes a language model. Agent
-prompts and the agent skill call the CLI from outside that boundary.
+The Python CLI is deterministic and never invokes a language model. It packages
+the canonical production prompts and emits self-contained agent requests; the
+agent skill calls the CLI from outside the model boundary.
 
 ## Development
 
@@ -33,10 +34,10 @@ location as `${SKILL_DIR}` (equal to `${CLAUDE_SKILL_DIR}` under Claude Code),
 so it works unchanged under any host.
 
 The Python wheel and the agent skill are intentionally separate deliverables.
-The wheel installs only the `falsiq` package and console scripts; it does not
-place files into a target repository. To use Falsiq elsewhere, an operator
-installs the matching tool version outside the target dependency graph and
-separately places the self-contained `skill/` directory under a discovery
+The wheel installs the `falsiq` package, its canonical prompt assets, and console
+scripts; it does not place files into a target repository. To use Falsiq
+elsewhere, an operator installs the matching tool version outside the target
+dependency graph and separately places the `skill/` directory under a discovery
 root: `<target>/.agents/skills/falsiq/` for Cursor, Codex, and generic agents,
 or `<target>/.claude/skills/falsiq/` for Claude Code. For example, from
 outside the target repo:
@@ -47,11 +48,13 @@ mkdir -p /absolute/path/to/target/.agents/skills
 cp -R /absolute/path/to/falsiq/skill /absolute/path/to/target/.agents/skills/falsiq
 ```
 
-The bundled prompt references are byte-identical copies of the canonical files
-under `agents/`, enforced by tests. The skill checks for exactly `falsiq 0.1.0`
-and stops with an installation prerequisite instead of modifying target
-dependencies. In its source checkout, the checked-in symlinks remain the normal
-discovery paths; do not replace them with generated second copies.
+Production prompts exist only under `falsiq/prompts/`. The CLI places their exact
+text, the Pydantic-generated response schema, and valid role-bound examples in
+each agent request, so the copied skill needs no prompt mirror. The skill checks
+for exactly `falsiq 0.1.0` and stops with an installation prerequisite instead
+of modifying target dependencies. In its source checkout, the checked-in
+symlinks remain the normal discovery paths; do not replace them with generated
+second copies.
 
 ## Executable agents
 
@@ -106,9 +109,22 @@ for the child, writes no transcript, and returns only a generic error.
 
 ## Attack rounds
 
-Class-specific attackers emit strict disposable candidate batches. After
-normalization and selection, append one machine-verified round envelope and
-render its open collisions:
+Class-specific attackers receive self-contained requests containing the exact
+prompt, current state, response schema, and valid empty and populated examples.
+Their untrusted output is prepared independently before selection:
+
+```console
+falsiq attack request --case CASE_ID --attacker boundary > boundary-request.json
+falsiq attack prepare --case CASE_ID --attacker boundary \
+  --file boundary-raw.json > boundary.json
+```
+
+`attack prepare` rejects malformed JSON, duplicate keys, wrong case or role,
+extra fields, unsafe files, and all other schema violations. Because zero
+candidates is already a valid semantic result, rejected output becomes that
+role's canonical empty batch with a warning instead of aborting the entire
+round. Valid output is normalized unchanged. After all five roles are prepared,
+append one machine-verified round envelope and render its open collisions:
 
 ```console
 falsiq attack assemble --case CASE_ID --round 1 \
@@ -180,9 +196,9 @@ documented no-op because Windows does not expose the required operation.
 
 ## Derivation handoff
 
-The CLI never invokes a model. Emit a canonical request, give that JSON to the
-external deriver described by the canonical `agents/deriver.md` (bundled for the
-skill as `skill/references/deriver.md`), then submit its strict JSON response:
+The CLI never invokes a model. Emit a canonical request containing the canonical
+deriver instructions and exact response schema, give that JSON to the external
+deriver, then submit its strict JSON response:
 
 ```console
 falsiq derive --case CASE_ID

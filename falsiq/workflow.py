@@ -8,12 +8,29 @@ import os
 import stat
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from .attacks import AttackCandidateBatch, SelectionEnvelope, build_selection_envelope
-from .facts import AttackFact, DerivationFact, IntentFact, RulingFact, Ulid
+from .attacks import (
+    AttackCandidate,
+    AttackCandidateBatch,
+    AttackClass,
+    SelectionEnvelope,
+    build_selection_envelope,
+)
+from .facts import (
+    SCHEMA_VERSION,
+    Artifact,
+    ArtifactOption,
+    AttackFact,
+    DerivationFact,
+    IntentFact,
+    RulingFact,
+    Ulid,
+)
 from .ledger import FalsiqError, Ledger, LedgerValidationError, derive_case_state
+from .prompt_assets import load_production_prompt
 
 ATTACK_CLASSES = ("boundary", "consequence", "prototype", "conflict", "omission")
 MAX_ATTACK_BATCH_BYTES = 1_000_000
@@ -25,6 +42,127 @@ class AssemblyError(FalsiqError):
 
 class GuardError(FalsiqError):
     """The human-ruling or derivation barrier has not been satisfied."""
+
+
+class AttackGenerationRequest(BaseModel):
+    """Self-contained instructions and schema for one external attacker."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    case_id: Ulid
+    attacker: AttackClass
+    instructions: str = Field(min_length=1)
+    state: dict[str, object]
+    response_schema: dict[str, object]
+    examples: list[dict[str, object]] = Field(min_length=2, max_length=2)
+
+
+def _attack_example(case_id: str, attacker: AttackClass) -> AttackCandidateBatch:
+    options = [
+        ArtifactOption(key="A", body="Preserve the existing behavior."),
+        ArtifactOption(key="B", body="Use the new behavior."),
+    ]
+    if attacker == "consequence":
+        artifact = Artifact(
+            type="scenario",
+            body=(
+                "After 30 days, a second user observes the old behavior while the first "
+                "sees the new behavior."
+            ),
+        )
+    elif attacker in {"prototype", "conflict"}:
+        artifact = Artifact(type="rivals", options=options)
+    else:
+        artifact = Artifact(type="input", options=options)
+    decision = f"observable {attacker} behavior"
+    candidate = AttackCandidate(
+        klass=attacker,
+        targets=[case_id],
+        artifact=artifact,
+        settles=[decision],
+        silent_settles=[decision],
+        hate_scenario="The implementation silently chooses the behavior the user rejects.",
+        render_cost="cheap" if attacker == "prototype" else "trivial",
+    )
+    return AttackCandidateBatch(case_id=case_id, attacker=attacker, candidates=[candidate])
+
+
+def build_attack_request(
+    ledger: Ledger,
+    case_id: str,
+    attacker: AttackClass,
+) -> AttackGenerationRequest:
+    """Build one exact, role-scoped attacker contract from current ledger state."""
+
+    TypeAdapter(Ulid).validate_python(case_id, strict=True)
+    TypeAdapter(AttackClass).validate_python(attacker, strict=True)
+    case_state = ledger.state(case_id)
+    state = ledger.state() if attacker == "conflict" else case_state
+    empty = AttackCandidateBatch(case_id=case_id, attacker=attacker, candidates=[])
+    populated = _attack_example(case_id, attacker)
+    return AttackGenerationRequest(
+        case_id=case_id,
+        attacker=attacker,
+        instructions=load_production_prompt(attacker),
+        state=state,
+        response_schema=AttackCandidateBatch.model_json_schema(),
+        examples=[empty.model_dump(mode="json"), populated.model_dump(mode="json")],
+    )
+
+
+def canonical_attack_request_json(request: AttackGenerationRequest) -> str:
+    """Serialize one attacker request deterministically."""
+
+    return json.dumps(
+        request.model_dump(mode="json"),
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _reject_json_constant(value: str) -> object:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def prepare_attack_batch(
+    case_id: str,
+    attacker: AttackClass,
+    path: Path,
+) -> tuple[AttackCandidateBatch, bool]:
+    """Validate untrusted output or replace it with a canonical empty batch.
+
+    A model can validly emit no candidates, so malformed output has no safer
+    semantic recovery than the same empty contribution. Other attacker roles
+    can still complete the round, and deterministic assembly remains strict.
+    """
+
+    TypeAdapter(Ulid).validate_python(case_id, strict=True)
+    TypeAdapter(AttackClass).validate_python(attacker, strict=True)
+    fallback = AttackCandidateBatch(case_id=case_id, attacker=attacker, candidates=[])
+    try:
+        value = json.loads(
+            _read_regular_file(path).decode("utf-8"),
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+        batch = AttackCandidateBatch.model_validate(value)
+        if batch.case_id != case_id or batch.attacker != attacker:
+            return fallback, True
+    except (AssemblyError, RecursionError, UnicodeDecodeError, ValueError, TypeError):
+        return fallback, True
+    return batch, False
 
 
 def _read_regular_file(path: Path) -> bytes:
@@ -264,9 +402,13 @@ def ready_brief(case_id: str, start: Path | None = None) -> tuple[Ledger, Path]:
 __all__ = [
     "ATTACK_CLASSES",
     "MAX_ATTACK_BATCH_BYTES",
+    "AttackGenerationRequest",
     "AssemblyError",
     "GuardError",
     "assemble_attack_round",
+    "build_attack_request",
+    "canonical_attack_request_json",
     "canonical_selection_json",
+    "prepare_attack_batch",
     "ready_brief",
 ]

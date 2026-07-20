@@ -11,7 +11,12 @@ $ command -v falsiq && falsiq --version
 <installed falsiq 0.1.0 console tool outside the target dependency graph>
 $ falsiq intent "<verbatim request>"
 <CASE>
+$ falsiq attack request --case <CASE> --attacker <each class>
+<five self-contained requests with instructions, JSON Schema, and examples>
 [five fresh class-specific attackers run in parallel]
+$ falsiq attack prepare --case <CASE> --attacker <each class> --file <raw response>
+<five validated batches; malformed output becomes that class's empty batch>
+[any degraded role warning is disclosed with the round result]
 $ falsiq attack assemble --case <CASE> --round 1 <five batch files>
 {"candidates":[...],"selected":["<digest>",...],...}
 $ falsiq attack add --file <round.json>
@@ -25,7 +30,9 @@ No implementation has started. Reply with an explicit ruling for every displayed
 $ falsiq rule <ATTACK> forbidden
 [all other explicit ruling commands run; omitted attacks remain open]
 [state confirms zero open attacks and the forbidden ruling opens the round-two gate]
+$ falsiq attack request --case <CASE> --attacker <each class>
 [five fresh class-specific attackers run in parallel for round 2]
+$ falsiq attack prepare --case <CASE> --attacker <each class> --file <raw response>
 $ falsiq attack assemble --case <CASE> --round 2 <five batch files>
 {"candidates":[],"selected":[],...}
 [round-2 attack add and collide are not called because selection is empty]
@@ -54,6 +61,8 @@ $ falsiq outcome abandoned --case <CASE> --trace n/a --notes "User explicitly re
 
 ```text
 [all five attacker batches contain zero candidates]
+$ falsiq attack request --case <CASE> --attacker <each class>
+$ falsiq attack prepare --case <CASE> --attacker <each class> --file <raw response>
 $ falsiq attack assemble --case <CASE> --round 1 <five batch files>
 {"candidates":[],"selected":[],...}
 [attack add and collide are not called; derivation begins]

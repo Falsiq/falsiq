@@ -146,6 +146,7 @@ def test_derivation_request_is_strict_deterministic_and_prompt_keyed(tmp_path: P
 
     assert first == second
     assert first.ledger_head == facts[-1].id
+    assert first.instructions == DERIVER_PROMPT
     assert first.prompt_sha256 == deriver_prompt_hash()
     assert len(first.request_id) == 64
     assert first.response_schema == DeriverResponse.model_json_schema()
@@ -535,11 +536,9 @@ def test_amendment_text_is_rendered_verbatim_only_from_linked_ledger_facts(
 
 
 def test_deriver_prompt_file_matches_the_hashed_runtime_contract() -> None:
-    prompt_path = Path(__file__).parents[1] / "agents" / "deriver.md"
-    skill_prompt_path = Path(__file__).parents[1] / "skill" / "references" / "deriver.md"
+    prompt_path = Path(__file__).parents[1] / "falsiq" / "prompts" / "deriver.md"
 
     assert prompt_path.read_text(encoding="utf-8") == DERIVER_PROMPT
-    assert skill_prompt_path.read_text(encoding="utf-8") == DERIVER_PROMPT
     assert deriver_prompt_hash() == (
         "9297e30e738f4e76904ebeb6cdefe733066419500a27a9e42c1ced93309da6ea"
     )

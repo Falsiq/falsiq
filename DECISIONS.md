@@ -206,14 +206,15 @@ version, invokes plain `falsiq`, and stops instead of installing or upgrading a
 missing or mismatched tool. It never uses a target interpreter to import
 Falsiq.
 
-Round assembly and handoff guarding therefore live in package APIs exposed as
-`falsiq attack assemble` and `falsiq guard`. Historical Python scripts are thin
-source-checkout compatibility wrappers, not production skill dependencies. The
-canonical agent prompts remain under `agents/`; byte-equal copies under
-`skill/references/` make a placed skill portable without depending on the
-Falsiq source tree. A valid guard proves committed artifact integrity, while
-model-authored test stubs remain untrusted and require complete inspection
-before execution or merge.
+Round request generation, assembly, and handoff guarding therefore live in
+package APIs exposed as `falsiq attack request`, `falsiq attack assemble`, and
+`falsiq guard`. Historical Python scripts are thin source-checkout compatibility
+wrappers, not production skill dependencies. Canonical production prompts live
+once as package data under `falsiq/prompts/`; requests carry their exact prompt,
+Pydantic-generated response schema, and valid examples, so a placed skill needs
+no prompt copy or Falsiq source tree. A valid guard proves committed artifact
+integrity, while model-authored test stubs remain untrusted and require complete
+inspection before execution or merge.
 
 ## D019: Corpus descriptor modes are portable best effort
 
@@ -288,10 +289,28 @@ Cursor, Codex, and other generic skill-aware hosts. Neither entry is a second
 copy; a target repository may instead place a copied regular skill directory
 under either discovery root.
 
-`SKILL.md` references its bundled scripts and prompts only through
-`${SKILL_DIR}`, resolved once per session as the directory containing the
-loaded `SKILL.md`. Under Claude Code that value is `${CLAUDE_SKILL_DIR}`;
-other hosts use the absolute path of the discovered skill directory. The
-workflow itself is host-neutral: it invokes only the separately installed
-`falsiq` console script and never a host-specific runtime API, so barriers,
-round limits, and guard semantics are identical across hosts.
+`SKILL.md` references its bundled scripts only through `${SKILL_DIR}`, resolved
+once per session as the directory containing the loaded `SKILL.md`. Production
+prompts come from self-contained requests emitted by the installed CLI. Under
+Claude Code `${SKILL_DIR}` is `${CLAUDE_SKILL_DIR}`; other hosts use the absolute
+path of the discovered skill directory. The workflow itself is host-neutral:
+it invokes only the separately installed `falsiq` console script and never a
+host-specific runtime API, so barriers, round limits, and guard semantics are
+identical across hosts.
+
+## D025: Malformed attacker output degrades only its own role
+
+An external attacker may honestly return zero candidates, so malformed output
+has no safe semantic repair that is stronger than the same empty contribution.
+Before round assembly, `falsiq attack prepare` reads each untrusted response as
+a bounded regular non-symlinked file, rejects invalid UTF-8, non-standard JSON,
+duplicate keys, extra fields, wrong case or role, and every Pydantic schema
+violation. A rejection emits a warning and the canonical empty batch for that
+role; it does not abort or alter the other four roles.
+
+This availability fallback never relaxes `attack assemble` or `attack add`.
+Prepared batches and selection envelopes remain strictly validated, candidates
+are never inferred from malformed bytes, and no partial durable batch is
+appended. Self-contained attacker requests reduce fallback frequency by carrying
+the exact response schema and valid empty and populated examples alongside the
+canonical prompt and ledger state.

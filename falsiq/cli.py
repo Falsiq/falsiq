@@ -26,7 +26,15 @@ from .facts import AttackFact, IntentFact, RulingFact, new_ulid, utc_timestamp
 from .ledger import FalsiqError, Ledger, LedgerValidationError, canonical_fact_json
 from .rulings import RulingCommandError, build_outcome, build_ruling_batch
 from .sandbox import SandboxError, create_sandbox, reap_sandboxes, sandbox_json
-from .workflow import assemble_attack_round, canonical_selection_json, ready_brief
+from .workflow import (
+    ATTACK_CLASSES,
+    assemble_attack_round,
+    build_attack_request,
+    canonical_attack_request_json,
+    canonical_selection_json,
+    prepare_attack_batch,
+    ready_brief,
+)
 
 
 def _init_command(_args: argparse.Namespace) -> int:
@@ -135,6 +143,23 @@ def _attack_add_command(args: argparse.Namespace) -> int:
 def _attack_assemble_command(args: argparse.Namespace) -> int:
     envelope = assemble_attack_round(args.case_id, args.round_number, args.batches)
     print(canonical_selection_json(envelope))
+    return 0
+
+
+def _attack_request_command(args: argparse.Namespace) -> int:
+    request = build_attack_request(Ledger.open(), args.case_id, args.attacker)
+    print(canonical_attack_request_json(request))
+    return 0
+
+
+def _attack_prepare_command(args: argparse.Namespace) -> int:
+    batch, degraded = prepare_attack_batch(args.case_id, args.attacker, args.file)
+    if degraded:
+        print(
+            f"warning: invalid {args.attacker} attacker output was replaced by an empty batch",
+            file=sys.stderr,
+        )
+    print(batch.model_dump_json())
     return 0
 
 
@@ -269,6 +294,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     attack_parser = commands.add_parser("attack", help="validate and append attack rounds")
     attack_commands = attack_parser.add_subparsers(dest="attack_command", required=True)
+    attack_request_parser = attack_commands.add_parser(
+        "request",
+        help="emit a self-contained request for one attacker",
+    )
+    attack_request_parser.add_argument("--case", dest="case_id", required=True)
+    attack_request_parser.add_argument("--attacker", choices=tuple(ATTACK_CLASSES), required=True)
+    attack_request_parser.set_defaults(handler=_attack_request_command)
+    attack_prepare_parser = attack_commands.add_parser(
+        "prepare",
+        help="validate attacker output with an empty-batch fallback",
+    )
+    attack_prepare_parser.add_argument("--case", dest="case_id", required=True)
+    attack_prepare_parser.add_argument("--attacker", choices=tuple(ATTACK_CLASSES), required=True)
+    attack_prepare_parser.add_argument("-f", "--file", type=Path, required=True)
+    attack_prepare_parser.set_defaults(handler=_attack_prepare_command)
     attack_assemble_parser = attack_commands.add_parser(
         "assemble",
         help="assemble five attacker batches into a deterministic round",
