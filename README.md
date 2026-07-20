@@ -6,7 +6,7 @@ append-only JSONL ledger, then derives disposable implementation briefs from
 that durable record.
 
 The Python CLI is deterministic and never invokes a language model. Agent
-prompts and the Claude Code skill call the CLI from outside that boundary.
+prompts and the agent skill call the CLI from outside that boundary.
 
 ## Development
 
@@ -20,32 +20,38 @@ The command can be run from the checkout with `uv run falsiq` or installed as
 the `falsiq` console script. The production skill always uses the installed
 console script; it does not assume the target repository is a Python project.
 
-## Claude Code skill
+## Agent skill
 
-The canonical Falsiq skill is [`skill/SKILL.md`](skill/SKILL.md). Claude Code
-2.1.203 and newer discovers it through the checked-in
-`.claude/skills/falsiq` directory symlink. Keeping discovery as a symlink makes
-the workflow, helper scripts, and fixtures a single source of truth instead of
-maintaining a second copy under `.claude/`.
+The canonical Falsiq skill is [`skill/SKILL.md`](skill/SKILL.md). Two
+checked-in directory symlinks expose it to skill-aware agent hosts:
+`.claude/skills/falsiq` for Claude Code 2.1.203 and newer, and
+`.agents/skills/falsiq` for the cross-tool skills standard read by Cursor,
+Codex, and other generic agents. Keeping discovery as symlinks makes the
+workflow, helper scripts, and fixtures a single source of truth instead of
+maintaining copies under each discovery root. The skill resolves its own
+location as `${SKILL_DIR}` (equal to `${CLAUDE_SKILL_DIR}` under Claude Code),
+so it works unchanged under any host.
 
-The Python wheel and the Claude Code skill are intentionally separate
-deliverables. The wheel installs only the `falsiq` package and console scripts;
-it does not place files into a target repository. To use Falsiq elsewhere, an
-operator installs the matching tool version outside the target dependency graph
-and separately places the self-contained `skill/` directory at
-`<target>/.claude/skills/falsiq/`. For example, from outside the target repo:
+The Python wheel and the agent skill are intentionally separate deliverables.
+The wheel installs only the `falsiq` package and console scripts; it does not
+place files into a target repository. To use Falsiq elsewhere, an operator
+installs the matching tool version outside the target dependency graph and
+separately places the self-contained `skill/` directory under a discovery
+root: `<target>/.agents/skills/falsiq/` for Cursor, Codex, and generic agents,
+or `<target>/.claude/skills/falsiq/` for Claude Code. For example, from
+outside the target repo:
 
 ```console
 uv tool install /absolute/path/to/falsiq
-mkdir -p /absolute/path/to/target/.claude/skills
-cp -R /absolute/path/to/falsiq/skill /absolute/path/to/target/.claude/skills/falsiq
+mkdir -p /absolute/path/to/target/.agents/skills
+cp -R /absolute/path/to/falsiq/skill /absolute/path/to/target/.agents/skills/falsiq
 ```
 
 The bundled prompt references are byte-identical copies of the canonical files
 under `agents/`, enforced by tests. The skill checks for exactly `falsiq 0.1.0`
 and stops with an installation prerequisite instead of modifying target
-dependencies. In its source checkout, the checked-in symlink remains the normal
-discovery path; do not replace it with a generated second copy.
+dependencies. In its source checkout, the checked-in symlinks remain the normal
+discovery paths; do not replace them with generated second copies.
 
 ## Executable agents
 

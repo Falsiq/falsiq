@@ -421,6 +421,9 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
         "Inspect every generated test stub completely",
         "Never run, import, copy, or merge them as-is",
         "translate each forbidden behavior into a new repository-native failing test",
+        "${SKILL_DIR}/scripts/require_cli.sh",
+        ".agents/skills/falsiq",
+        ".claude/skills/falsiq",
     )
     assert all(phrase in skill for phrase in required_skill_phrases)
     assert "uv run" not in skill
@@ -439,6 +442,9 @@ def test_skill_contract_and_scripted_transcript_encode_human_barriers() -> None:
     assert "Surrounding prose, synonyms, and case variants do not bypass" in normalized_skill
     assert "declared compatible CLI version" in normalized_skill
     assert "exactly matches this skill" not in skill
+    assert "Resolve `${SKILL_DIR}` once per session" in normalized_skill
+    assert "Under Claude Code that is exactly `${CLAUDE_SKILL_DIR}`" in normalized_skill
+    assert "Under Cursor, Codex, or another generic agent host" in normalized_skill
 
     forbidden = transcript.index("$ falsiq rule <ATTACK> forbidden")
     round_two_agents = transcript.index(
@@ -474,7 +480,7 @@ def test_skill_bundles_every_runtime_prompt_from_the_canonical_agents() -> None:
         canonical = ROOT / "agents" / prompt_name
         bundled = ROOT / "skill" / "references" / prompt_name
         assert bundled.read_bytes() == canonical.read_bytes()
-        assert f"${{CLAUDE_SKILL_DIR}}/references/{prompt_name}" in skill
+        assert f"${{SKILL_DIR}}/references/{prompt_name}" in skill
 
 
 def test_cli_prerequisite_fails_closed_with_actionable_missing_executable(
@@ -607,6 +613,18 @@ def test_installed_console_workflow_is_portable_to_a_repo_without_project_files(
 
 def test_claude_project_discovery_is_a_single_source_directory_symlink() -> None:
     discovery = ROOT / ".claude" / "skills" / "falsiq"
+
+    assert discovery.is_symlink()
+    assert os.readlink(discovery) == "../../skill"
+    assert discovery.resolve() == (ROOT / "skill").resolve()
+    assert (discovery / "SKILL.md").samefile(ROOT / "skill" / "SKILL.md")
+    assert (discovery / "scripts" / "assemble_round.py").samefile(ASSEMBLE)
+
+
+def test_agents_project_discovery_is_a_single_source_directory_symlink() -> None:
+    """Cursor, Codex, and generic agents discover the skill via .agents/skills/."""
+
+    discovery = ROOT / ".agents" / "skills" / "falsiq"
 
     assert discovery.is_symlink()
     assert os.readlink(discovery) == "../../skill"

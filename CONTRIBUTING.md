@@ -39,8 +39,8 @@ and evaluation contracts in the same logical change.
 
 The current v0 implements deterministic ledger plumbing, external-agent
 protocols, attack selection, ruling and derivation handoffs, prototype
-sandboxes, replay-first evaluation, corpus release controls, and the Claude Code
-workflow. It does **not** include a bundled provider adapter, invoke a language
+sandboxes, replay-first evaluation, corpus release controls, and the agent
+skill workflow for Claude Code, Cursor, Codex, and generic skill-aware hosts. It does **not** include a bundled provider adapter, invoke a language
 model from the `falsiq` CLI, contain an approved held-out corpus, or establish
 the PRD's held-out success thresholds. Do not claim those results without a
 human-approved, access-logged official run.
@@ -117,7 +117,7 @@ payload, and a non-CI environment. The evaluation runner itself is replay-only.
 | `eval/run.py` | Thin replay-evaluation command entry point |
 | `eval/prepare_corpus.py` | Operator command for a reviewed public/private corpus release |
 | `agents/` | Canonical versioned prompts for production and evaluation roles |
-| `skill/` | Self-contained Claude Code orchestration workflow, bundled production prompts, helper scripts, and executable transcript |
+| `skill/` | Self-contained agent orchestration workflow (Claude Code, Cursor, Codex, and generic hosts), bundled production prompts, helper scripts, and executable transcript |
 | `tests/` | Unit, CLI, integration, concurrency, failure-injection, portability, golden, prompt, and workflow contract tests |
 
 `falsiq/__main__.py` exposes `python -m falsiq`. The wheel also installs two
@@ -198,7 +198,8 @@ unzip -Z1 "$DIST"/*.whl
 ```
 
 The wheel should contain the `falsiq` package and distribution metadata, not
-tests, prompts, evaluation corpora, `.claude/`, or the skill directory.
+tests, prompts, evaluation corpora, `.claude/`, `.agents/`, or the skill
+directory.
 
 ### Test by boundary
 
@@ -313,9 +314,14 @@ Prompt and workflow files are executable contracts, not informal prose.
   contract version and strict JSON instructions aligned with the Pydantic models
   in `benchmark.py` and `evaluation.py`; run `tests/test_eval_prompts.py` and the
   relevant evaluation protocol tests.
-- `skill/SKILL.md` is the canonical skill. `.claude/skills/falsiq` must remain the
-  checked-in `../../skill` directory symlink rather than a generated second
-  copy. A skill installed into another repository may be a copied directory.
+- `skill/SKILL.md` is the canonical skill. `.claude/skills/falsiq` and
+  `.agents/skills/falsiq` must remain checked-in `../../skill` directory
+  symlinks rather than generated second copies. A skill installed into another
+  repository may be a copied directory under either discovery root. The skill
+  references its own scripts and prompts only through the tool-agnostic
+  `${SKILL_DIR}` convention, which resolves to `${CLAUDE_SKILL_DIR}` under
+  Claude Code and to the loaded skill directory under Cursor, Codex, or a
+  generic host; keep that convention and its test assertions synchronized.
 - Workflow transitions, bypass wording, CLI prerequisites, or human barriers
   require matching changes to `skill/fixtures/workflow_transcript.md` and its
   executable assertions. The only bypass phrase is a case-sensitive standalone

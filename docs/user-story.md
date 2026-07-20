@@ -29,21 +29,23 @@ does not install or repair the target project's dependencies.
 > asking an agent to modify.
 
 The target must be a Git worktree. It does not need to be a Python project.
-Claude Code 2.1.203 or newer is required for the source checkout's symlinked
-skill discovery; a target may use the copied regular skill directory shown
-below.
+The copied skill directory shown below goes under a skill discovery root:
+`.agents/skills/` for Cursor, Codex, and other generic agents, or
+`.claude/skills/` for Claude Code. Claude Code 2.1.203 or newer is required
+only for the source checkout's symlinked skill discovery; a target may use the
+copied regular skill directory shown below.
 
 From an operator environment that has the Falsiq checkout:
 
 ```console
 $ uv tool install /absolute/path/to/falsiq
-$ mkdir -p /absolute/path/to/target/.claude/skills
+$ mkdir -p /absolute/path/to/target/.agents/skills
 $ cp -R /absolute/path/to/falsiq/skill \
-    /absolute/path/to/target/.claude/skills/falsiq
+    /absolute/path/to/target/.agents/skills/falsiq
 $ cd /absolute/path/to/target
 $ falsiq --version
 falsiq 0.1.0
-$ sh .claude/skills/falsiq/scripts/require_cli.sh
+$ sh .agents/skills/falsiq/scripts/require_cli.sh
 ```
 
 The prerequisite script is silent on success. It stops with an actionable

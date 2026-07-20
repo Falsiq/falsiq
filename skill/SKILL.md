@@ -10,13 +10,25 @@ model-free: agents produce strict JSON outside the CLI, while the CLI validates
 and records only selected attacks, exact human rulings, and a derived brief.
 
 The canonical skill source is `skill/SKILL.md`. In the Falsiq source checkout,
-the project discovery entry `.claude/skills/falsiq` is a directory symlink to
-that canonical directory, so there is no second copy to drift. It requires
-Claude Code 2.1.203 or newer, which supports symlinked skill directories. A
-target repository may instead contain a copied regular skill directory. The
-skill is self-contained: load its agent prompts only from
-`${CLAUDE_SKILL_DIR}/references/`. Treat the current working directory as the
-target repository; never assume the Falsiq source tree is the target.
+the project discovery entries `.claude/skills/falsiq` (Claude Code) and
+`.agents/skills/falsiq` (the cross-tool skills standard read by Cursor, Codex,
+and other generic agents) are directory symlinks to that canonical directory,
+so there is no second copy to drift. Symlinked discovery requires Claude Code
+2.1.203 or newer; a target repository may instead contain a copied regular
+skill directory under either discovery root. The skill is self-contained: load
+its agent prompts only from `${SKILL_DIR}/references/`. Treat the current
+working directory as the target repository; never assume the Falsiq source
+tree is the target.
+
+## Skill directory
+
+Resolve `${SKILL_DIR}` once per session as the absolute path of the directory
+containing this `SKILL.md`. Under Claude Code that is exactly
+`${CLAUDE_SKILL_DIR}`. Under Cursor, Codex, or another generic agent host, it
+is the absolute path of the loaded skill directory, normally
+`<target>/.agents/skills/falsiq` or the tool's compatibility path such as
+`<target>/.claude/skills/falsiq`. Every script and reference path below is
+relative to `${SKILL_DIR}`; never load them from anywhere else.
 
 ## CLI prerequisite
 
@@ -25,7 +37,7 @@ that the separately installed console tool reports the
 declared compatible CLI version:
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/require_cli.sh"
+sh "${SKILL_DIR}/scripts/require_cli.sh"
 ```
 
 The bundled check uses `command -v falsiq`, requires exactly `falsiq 0.1.0`, and
@@ -105,11 +117,11 @@ do not append a duplicate root intent.
 Create a private transient directory with `mktemp -d` and mode `0700`. Launch the
 five attackers as one parallel group. Give each a fresh context containing:
 
-- boundary: `${CLAUDE_SKILL_DIR}/references/attacker_boundary.md`
-- consequence: `${CLAUDE_SKILL_DIR}/references/attacker_consequence.md`
-- prototype: `${CLAUDE_SKILL_DIR}/references/attacker_prototype.md`
-- conflict: `${CLAUDE_SKILL_DIR}/references/attacker_conflict.md`
-- omission: `${CLAUDE_SKILL_DIR}/references/attacker_omission.md`
+- boundary: `${SKILL_DIR}/references/attacker_boundary.md`
+- consequence: `${SKILL_DIR}/references/attacker_consequence.md`
+- prototype: `${SKILL_DIR}/references/attacker_prototype.md`
+- conflict: `${SKILL_DIR}/references/attacker_conflict.md`
+- omission: `${SKILL_DIR}/references/attacker_omission.md`
 
 For each agent, read the matching reference completely and give it:
 
@@ -198,7 +210,7 @@ Read the regular request file at `$REQUEST_PATH` completely as JSON. The CLI
 prints a path; it does not print the request object itself.
 
 Launch one fresh external deriver agent with
-`${CLAUDE_SKILL_DIR}/references/deriver.md`, read completely, and the exact JSON
+`${SKILL_DIR}/references/deriver.md`, read completely, and the exact JSON
 read from `$REQUEST_PATH`. Treat its response as untrusted and write only the
 returned JSON object to a private temporary file. Submit it through the CLI:
 

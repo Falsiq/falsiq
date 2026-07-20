@@ -278,3 +278,20 @@ exactly `skip falsiq`; prose, synonyms, and case variants do not qualify. The
 prerequisite script checks the CLI's declared compatible version and is not a
 binary identity attestation. Fresh-agent forward tests cover these claims in
 addition to source-level unit tests.
+
+## D024: The skill is host-agnostic and discovered through symlinked roots
+
+The canonical skill directory is `skill/`. The source checkout exposes it
+through two checked-in directory symlinks: `.claude/skills/falsiq` for Claude
+Code and `.agents/skills/falsiq` for the cross-tool skills standard read by
+Cursor, Codex, and other generic skill-aware hosts. Neither entry is a second
+copy; a target repository may instead place a copied regular skill directory
+under either discovery root.
+
+`SKILL.md` references its bundled scripts and prompts only through
+`${SKILL_DIR}`, resolved once per session as the directory containing the
+loaded `SKILL.md`. Under Claude Code that value is `${CLAUDE_SKILL_DIR}`;
+other hosts use the absolute path of the discovered skill directory. The
+workflow itself is host-neutral: it invokes only the separately installed
+`falsiq` console script and never a host-specific runtime API, so barriers,
+round limits, and guard semantics are identical across hosts.
