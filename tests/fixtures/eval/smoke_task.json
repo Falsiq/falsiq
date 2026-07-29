@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "task_id": "smoke_retry",
+  "stratum": "synthetic",
+  "vague_prompt": "add retry support to the fixture fetcher",
+  "context": {
+    "repo_fixture": "tests/fixtures/eval/workspace",
+    "notes": "Offline smoke fixture only; never part of the benchmark corpus."
+  },
+  "latent_requirements": [
+    {
+      "id": "LR1",
+      "text": "retry server failures but never client errors",
+      "discriminator": "a rendered 404 retry transcript distinguishes the behavior",
+      "severity": "rework"
+    },
+    {
+      "id": "LR2",
+      "text": "stop after three total attempts",
+      "discriminator": "a fourth request distinguishes the attempt cap",
+      "severity": "rework"
+    }
+  ],
+  "annoyance_budget": 2,
+  "human_curated": true
+}

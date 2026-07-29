@@ -1,3 +1,5 @@
+.falsiq/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -218,3 +220,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Repository-owned Claude Code skill discovery (overrides user-level ignores).
+!.claude/
+!.claude/skills/
+!.claude/skills/falsiq
