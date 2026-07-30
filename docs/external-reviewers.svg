@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">Falsiq external reviewer flow</title>
+  <desc id="desc">The deterministic Falsiq core builds five self-contained requests for transient boundary, consequence, prototype, conflict, and omission reviewers. Each untrusted response is independently prepared before deterministic assembly, selection, and human ruling.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .core { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; }
+      .external { fill: #ffffff; stroke: #64748b; stroke-width: 2; stroke-dasharray: 7 5; }
+      .prepared { fill: #ede9fe; stroke: #7c3aed; stroke-width: 2; }
+      .human { fill: #fef3c7; stroke: #d97706; stroke-width: 2; }
+      .line { fill: none; stroke: #334155; stroke-width: 2.2; marker-end: url(#arrow); }
+      .branch { fill: none; stroke: #64748b; stroke-width: 2; }
+      .title { fill: #0f172a; font: 700 28px Inter, "Segoe UI", Arial, sans-serif; }
+      .subtitle { fill: #475569; font: 15px Inter, "Segoe UI", Arial, sans-serif; }
+      .lane { fill: #64748b; font: 700 12px Inter, "Segoe UI", Arial, sans-serif; letter-spacing: 1.4px; }
+      .label { fill: #0f172a; font: 700 16px Inter, "Segoe UI", Arial, sans-serif; text-anchor: middle; }
+      .small { fill: #475569; font: 14px Inter, "Segoe UI", Arial, sans-serif; text-anchor: middle; }
+      .tag { fill: #334155; font: 700 12px Inter, "Segoe UI", Arial, sans-serif; text-anchor: middle; letter-spacing: .4px; }
+      .note { fill: #475569; font: 600 13px Inter, "Segoe UI", Arial, sans-serif; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1200" height="700" rx="18"/>
+  <text class="title" x="40" y="48">Falsiq · five external reviewer lenses</text>
+  <text class="subtitle" x="40" y="76">Parallel model work is transient and untrusted; deterministic preparation is the admission boundary.</text>
+
+  <text class="lane" x="40" y="112">SELF-CONTAINED INPUT</text>
+  <rect class="core" x="225" y="128" width="750" height="82" rx="14"/>
+  <text class="label" x="600" y="160">Role request builder</text>
+  <text class="small" x="600" y="184">exact prompt + current case state + strict schema + valid examples</text>
+
+  <path class="branch" d="M600 210 V246 M132 246 H1068"/>
+  <path class="branch" d="M132 246 V270 M366 246 V270 M600 246 V270 M834 246 V270 M1068 246 V270"/>
+
+  <text class="lane" x="40" y="260">TRANSIENT EXTERNAL PROCESSES</text>
+
+  <rect class="external" x="32" y="270" width="200" height="170" rx="12"/>
+  <text class="label" x="132" y="303">Boundary</text>
+  <text class="small" x="132" y="332">inputs, limits,</text>
+  <text class="small" x="132" y="352">and edge cases</text>
+  <text class="tag" x="132" y="397">UNTRUSTED JSON</text>
+  <text class="small" x="132" y="420">0 candidates is valid</text>
+
+  <rect class="external" x="266" y="270" width="200" height="170" rx="12"/>
+  <text class="label" x="366" y="303">Consequence</text>
+  <text class="small" x="366" y="332">downstream effects</text>
+  <text class="small" x="366" y="352">and scenarios</text>
+  <text class="tag" x="366" y="397">UNTRUSTED JSON</text>
+  <text class="small" x="366" y="420">0 candidates is valid</text>
+
+  <rect class="external" x="500" y="270" width="200" height="170" rx="12"/>
+  <text class="label" x="600" y="303">Prototype</text>
+  <text class="small" x="600" y="332">cheap rival probes</text>
+  <text class="small" x="600" y="352">and falsifiers</text>
+  <text class="tag" x="600" y="397">UNTRUSTED JSON</text>
+  <text class="small" x="600" y="420">0 candidates is valid</text>
+
+  <rect class="external" x="734" y="270" width="200" height="170" rx="12"/>
+  <text class="label" x="834" y="303">Conflict</text>
+  <text class="small" x="834" y="332">tensions between</text>
+  <text class="small" x="834" y="352">stated commitments</text>
+  <text class="tag" x="834" y="397">UNTRUSTED JSON</text>
+  <text class="small" x="834" y="420">0 candidates is valid</text>
+
+  <rect class="external" x="968" y="270" width="200" height="170" rx="12"/>
+  <text class="label" x="1068" y="303">Omission</text>
+  <text class="small" x="1068" y="332">missing decisions</text>
+  <text class="small" x="1068" y="352">and commitments</text>
+  <text class="tag" x="1068" y="397">UNTRUSTED JSON</text>
+  <text class="small" x="1068" y="420">0 candidates is valid</text>
+
+  <path class="branch" d="M132 440 V470 M366 440 V470 M600 440 V470 M834 440 V470 M1068 440 V470 M132 470 H1068"/>
+  <path class="line" d="M600 470 V495"/>
+
+  <text class="lane" x="40" y="490">DETERMINISTIC ADMISSION</text>
+  <rect class="prepared" x="150" y="505" width="435" height="110" rx="14"/>
+  <text class="label" x="367" y="538">Independent prepare + assemble</text>
+  <text class="small" x="367" y="564">malformed response → canonical empty batch + warning</text>
+  <text class="small" x="367" y="587">at most 20 normalized candidates</text>
+
+  <rect class="core" x="625" y="505" width="240" height="110" rx="14"/>
+  <text class="label" x="745" y="538">Verify · score · select</text>
+  <text class="small" x="745" y="564">recompute exact scores</text>
+  <text class="small" x="745" y="587">select at most 3 digests</text>
+
+  <rect class="human" x="905" y="505" width="245" height="110" rx="14"/>
+  <text class="label" x="1027" y="538">Human rulings</text>
+  <text class="small" x="1027" y="564">intended · forbidden</text>
+  <text class="small" x="1027" y="587">don’t care · amend</text>
+
+  <path class="line" d="M585 560 H625"/>
+  <path class="line" d="M865 560 H905"/>
+  <text class="note" x="600" y="660">Only the verified round envelope and selected reviews cross into durable state.</text>
+</svg>

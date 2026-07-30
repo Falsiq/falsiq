@@ -171,6 +171,8 @@ for the child, writes no transcript, and returns only a generic error.
 
 ## Review rounds
 
+![Falsiq external reviewer flow](docs/external-reviewers.svg)
+
 Class-specific reviewers receive self-contained requests containing the exact
 prompt, current state, response schema, and valid empty and populated examples.
 Their untrusted output is prepared independently before selection:

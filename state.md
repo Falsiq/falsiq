@@ -19,6 +19,8 @@ Implemented:
 - outcome attribution by case, attack class, and prompt digest;
 - packaged coding/writing domain profiles, tmpdir backend primitives, and four
   acceptance-check renderer strengths;
+- high-level architecture and five-reviewer SVGs linked from the public
+  documentation;
 - Python 3.13+ uv/Hatchling packaging and operator/integration documentation.
 
 Deferred by explicit project decision:
@@ -29,12 +31,14 @@ Deferred by explicit project decision:
 
 ## Verification
 
-Verified locally on 2026-07-29 with uv-managed CPython 3.13.5 and 3.14.3:
+Verified locally on 2026-07-30 with uv-managed CPython 3.13.5 and 3.14.3:
 
 - Python 3.13: 525 tests passed with 84% total branch-aware coverage;
 - Python 3.14: 525 tests passed;
 - `ruff check .` and `ruff format --check .`: passed;
 - `uv build`: wheel and source distribution built successfully;
+- both SVGs parsed as XML and rendered without clipping at an 850-pixel
+  documentation width;
 - the representative brief fixture is digest-pinned in the Conductor
   compatibility suite;
 - a non-Git writing-profile flow through a private external state root passed.

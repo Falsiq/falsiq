@@ -9,6 +9,8 @@ agent memory, usage history, or implementation state.
 
 ## Boundaries
 
+![Falsiq external reviewer flow](external-reviewers.svg)
+
 1. External reviewers receive transient role-specific requests.
 2. Falsiq verifies and selects candidates deterministically.
 3. Selected attacks and one complete review-round provenance fact append
