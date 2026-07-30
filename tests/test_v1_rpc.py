@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from falsiq.facts import IntentFact
 from falsiq.ledger import Ledger
 from falsiq.rpc import dispatch_request, serve
 
@@ -70,3 +75,45 @@ def test_rpc_rejects_paths_in_request_parameters(tmp_path: Path, monkeypatch) ->
     )
     assert response["ok"] is False
     assert "extra_forbidden" in response["error"]["message"]
+
+
+def test_two_rpc_processes_append_safely_to_one_external_ledger(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ledger = initialized_external_ledger(tmp_path, monkeypatch)
+    environment = {
+        **os.environ,
+        "FALSIQ_STATE_ROOT": str(ledger.state_dir),
+    }
+
+    def invoke(request_id: str) -> subprocess.CompletedProcess[str]:
+        request = {
+            "id": request_id,
+            "op": "intent",
+            "params": {"text": f"Concurrent intent {request_id}"},
+        }
+        return subprocess.run(
+            [sys.executable, "-m", "falsiq", "rpc"],
+            cwd=ledger.root,
+            env=environment,
+            input=json.dumps(request) + "\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(invoke, ("one", "two")))
+
+    assert all(result.returncode == 0 for result in results)
+    responses = [json.loads(result.stdout) for result in results]
+    assert all(response["ok"] is True for response in responses)
+    assert len([fact for fact in ledger.read() if isinstance(fact, IntentFact)]) == 2
+
+
+def test_rpc_module_has_no_model_network_or_process_runtime_surface() -> None:
+    source = (Path(__file__).parents[1] / "falsiq" / "rpc.py").read_text()
+    assert "subprocess" not in source
+    assert "socket" not in source
+    assert "openai" not in source.lower()
+    assert "anthropic" not in source.lower()
