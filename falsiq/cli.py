@@ -380,7 +380,7 @@ def _migrate_command(args: argparse.Namespace) -> int:
 
 
 def _outcomes_report_command(args: argparse.Namespace) -> int:
-    report = build_outcomes_report(Ledger.open().read())
+    report = build_outcomes_report(Ledger.open().read(), since=args.since)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
     else:
@@ -537,6 +537,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     outcomes_report = outcomes_commands.add_parser("report")
+    outcomes_report.add_argument("--since")
     outcomes_report.add_argument("--json", action="store_true")
     outcomes_report.set_defaults(handler=_outcomes_report_command)
 
