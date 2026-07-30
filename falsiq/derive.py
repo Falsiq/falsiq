@@ -32,6 +32,7 @@ from .facts import (
     Fact,
     IntentFact,
     RulingFact,
+    SchemaMigrationFact,
     Ulid,
     new_ulid,
     utc_timestamp,
@@ -539,11 +540,15 @@ def _prepare_directory_chain(repo_root: Path, parts: Sequence[str]) -> Path:
     return current
 
 
-def _derived_root(repo_root: Path, case_id: str) -> Path:
-    return _prepare_directory_chain(
-        repo_root,
-        [".falsiq", "cases", case_id, "derived"],
-    )
+def _derived_root(
+    repo_root: Path,
+    case_id: str,
+    *,
+    state_dir: Path | None = None,
+) -> Path:
+    if state_dir is not None:
+        return _prepare_directory_chain(state_dir, ["cases", case_id, "derived"])
+    return _prepare_directory_chain(repo_root, [".falsiq", "cases", case_id, "derived"])
 
 
 def _write_atomic(path: Path, content: bytes) -> None:
@@ -565,10 +570,15 @@ def _write_atomic(path: Path, content: bytes) -> None:
             Path(temporary_path).unlink(missing_ok=True)
 
 
-def write_derivation_request(repo_root: Path, request: DerivationRequest) -> Path:
+def write_derivation_request(
+    repo_root: Path,
+    request: DerivationRequest,
+    *,
+    state_dir: Path | None = None,
+) -> Path:
     """Atomically write one canonical request beneath its immutable ledger head."""
 
-    derived = _derived_root(repo_root, request.case_id)
+    derived = _derived_root(repo_root, request.case_id, state_dir=state_dir)
     head_directory = _prepare_directory_chain(derived, [request.ledger_head])
     destination = head_directory / "request.json"
     content = _canonical_json_bytes(request.model_dump(mode="json")) + b"\n"
@@ -637,33 +647,43 @@ def _derivation_lock(derived: Path) -> Iterator[None]:
 def _publish_with_ledger_append(
     derived: Path,
     brief: bytes,
+    brief_json: bytes | None,
     stubs: Mapping[str, bytes],
     append_fact: Callable[[], object],
     commit_status: Callable[[], bool | None],
 ) -> None:
     brief_path = derived / "IMPLEMENTATION_BRIEF.md"
+    brief_json_path = derived / "brief.json"
     tests_path = derived / "tests"
-    if brief_path.is_symlink() or tests_path.is_symlink():
-        raise OSError("derived brief and tests paths must not be symlinks")
+    if brief_path.is_symlink() or brief_json_path.is_symlink() or tests_path.is_symlink():
+        raise OSError("derived brief, brief.json, and tests paths must not be symlinks")
     if brief_path.exists() and not brief_path.is_file():
         raise OSError(f"derived brief path is not a file: {brief_path}")
+    if brief_json_path.exists() and not brief_json_path.is_file():
+        raise OSError(f"derived brief.json path is not a file: {brief_json_path}")
     if tests_path.exists() and not tests_path.is_dir():
         raise OSError(f"derived tests path is not a directory: {tests_path}")
 
     staging = Path(tempfile.mkdtemp(dir=derived, prefix=".derive-stage-"))
     token = staging.name.removeprefix(".derive-stage-")
     brief_backup = derived / f".brief-backup-{token}"
+    brief_json_backup = derived / f".brief-json-backup-{token}"
     tests_backup = derived / f".tests-backup-{token}"
     brief_backed_up = False
+    brief_json_backed_up = False
     tests_backed_up = False
     brief_published = False
+    brief_json_published = False
     tests_published = False
     append_attempted = False
     try:
         staged_brief = staging / "IMPLEMENTATION_BRIEF.md"
+        staged_brief_json = staging / "brief.json"
         staged_tests = staging / "tests"
         staged_tests.mkdir()
         _write_staged_file(staged_brief, brief)
+        if brief_json is not None:
+            _write_staged_file(staged_brief_json, brief_json)
         for filename, content in stubs.items():
             _write_staged_file(staged_tests / filename, content)
         if brief_path.exists():
@@ -671,6 +691,12 @@ def _publish_with_ledger_append(
             brief_backed_up = True
         os.replace(staged_brief, brief_path)
         brief_published = True
+        if brief_json is not None:
+            if brief_json_path.exists():
+                os.replace(brief_json_path, brief_json_backup)
+                brief_json_backed_up = True
+            os.replace(staged_brief_json, brief_json_path)
+            brief_json_published = True
         if tests_path.exists():
             os.replace(tests_path, tests_backup)
             tests_backed_up = True
@@ -688,10 +714,14 @@ def _publish_with_ledger_append(
         if committed is False:
             if brief_published:
                 _remove_path(brief_path)
+            if brief_json_published:
+                _remove_path(brief_json_path)
             if tests_published:
                 _remove_path(tests_path)
             if brief_backed_up:
                 os.replace(brief_backup, brief_path)
+            if brief_json_backed_up:
+                os.replace(brief_json_backup, brief_json_path)
             if tests_backed_up:
                 os.replace(tests_backup, tests_path)
         else:
@@ -700,12 +730,16 @@ def _publish_with_ledger_append(
             # artifacts and discard the superseded backups.
             if brief_backed_up:
                 _remove_path(brief_backup)
+            if brief_json_backed_up:
+                _remove_path(brief_json_backup)
             if tests_backed_up:
                 _remove_path(tests_backup)
         raise
     else:
         if brief_backed_up:
             _remove_path(brief_backup)
+        if brief_json_backed_up:
+            _remove_path(brief_json_backup)
         if tests_backed_up:
             _remove_path(tests_backup)
     finally:
@@ -717,6 +751,7 @@ def submit_derivation(
     facts: Sequence[Fact],
     response: DeriverResponse,
     *,
+    state_dir: Path | None = None,
     append_batch: Callable[[tuple[DerivationFact, ...]], object],
     fact_committed: Callable[[str], bool | None],
     id_factory: Callable[[], str] = new_ulid,
@@ -726,6 +761,14 @@ def submit_derivation(
 
     request = validate_deriver_response(facts, response.case_id, response)
     brief = render_implementation_brief(facts, response).encode("utf-8")
+    write_version = 2 if any(isinstance(fact, SchemaMigrationFact) for fact in facts) else 1
+    brief_json: bytes | None = None
+    if write_version == 2:
+        from .brief import canonical_brief_json, render_brief_contract
+
+        brief_json = (canonical_brief_json(render_brief_contract(facts, response)) + "\n").encode(
+            "utf-8"
+        )
     forbidden_order = _forbidden_rulings(facts, response.case_id)
     by_ruling = {item.ruling_id: item for item in response.forbidden_tests}
     stubs = {
@@ -736,12 +779,19 @@ def submit_derivation(
     brief_relative = f"cases/{response.case_id}/derived/IMPLEMENTATION_BRIEF.md"
     stub_relatives = [f"cases/{response.case_id}/derived/tests/{filename}" for filename in stubs]
     fact = DerivationFact(
+        schema_version=write_version,
         id=id_factory(),
         ts=timestamp_factory(),
         case_id=response.case_id,
         ledger_head=request.ledger_head,
         brief_path=brief_relative,
         brief_sha256=hashlib.sha256(brief).hexdigest(),
+        brief_json_path=(
+            f"cases/{response.case_id}/derived/brief.json" if brief_json is not None else None
+        ),
+        brief_json_sha256=(
+            hashlib.sha256(brief_json).hexdigest() if brief_json is not None else None
+        ),
         test_stub_paths=stub_relatives,
         test_stub_sha256={
             f"cases/{response.case_id}/derived/tests/{filename}": hashlib.sha256(
@@ -750,11 +800,12 @@ def submit_derivation(
             for filename, content in stubs.items()
         },
     )
-    derived = _derived_root(repo_root, response.case_id)
+    derived = _derived_root(repo_root, response.case_id, state_dir=state_dir)
     with _derivation_lock(derived):
         _publish_with_ledger_append(
             derived,
             brief,
+            brief_json,
             stubs,
             lambda: append_batch((fact,)),
             lambda: fact_committed(fact.id),

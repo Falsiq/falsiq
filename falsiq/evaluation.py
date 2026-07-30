@@ -27,7 +27,7 @@ from fractions import Fraction
 from itertools import combinations
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from statistics import fmean
-from typing import Annotated, Any, Literal, Protocol, TypeVar, cast
+from typing import Annotated, Any, Literal, Protocol, cast
 
 from pydantic import (
     BaseModel,
@@ -700,10 +700,7 @@ def _request_id(task_id: str, condition: str, role: str, suffix: str) -> str:
     return value
 
 
-TResponse = TypeVar("TResponse", bound=BaseModel)
-
-
-def _invoke(
+def _invoke[TResponse: BaseModel](
     runtime: EvaluationAgentRuntime,
     role: str,
     request_id: str,
