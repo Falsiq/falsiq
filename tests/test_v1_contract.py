@@ -10,7 +10,7 @@ from falsiq.rpc import RpcRequest
 
 CONTRACT = Path(__file__).parents[1] / "contract"
 FIXTURE_DIGESTS = {
-    "brief.json": "8812131063e1d5d7cbab37db378d1b520d64b74a9b598090dcca50249f4bfe59",
+    "brief.json": "714a6f7e61f47f85d4dcf3338672432e71ca4934b894dc22513e6d056ec01e65",
     "request.json": "39f4ae74373b53ce890db1be13fb81cdc4b9277add13038f9196bd9bb85ca288",
     "response.json": "5d22d0baae2c83fddeae003f526fe4abe58494bc0204dc906b68607d930ac9ed",
 }
