@@ -9,13 +9,50 @@ The Python CLI is deterministic and never invokes a language model. It packages
 the canonical production prompts and emits self-contained agent requests; the
 agent skill calls the CLI from outside the model boundary.
 
+Version 1 adds a separately versioned machine contract, schema-v2 durable
+provenance, stdio RPC, external state roots, domain profiles, and outcome
+attribution. Existing schema-v1 ledger lines remain readable and are never
+rewritten. See [`contract/README.md`](contract/README.md) for the only supported
+cross-component boundary and [`state.md`](state.md) for implementation status.
+
 ## Development
 
 ```console
-uv sync
-uv run pytest
+uv sync --locked
+uv run --python 3.13 pytest
 uv run ruff check .
 ```
+
+Python 3.13 or newer is required.
+
+## Version 1 quick start
+
+Migration is append-only and dry-runs unless `--apply` is present:
+
+```console
+falsiq migrate --to 2
+falsiq migrate --to 2 --apply
+```
+
+After migration, new cases pin a domain profile. Review append policy is loaded
+from an optional TOML file; the default is `max_rounds = 2`.
+
+```console
+falsiq intent --profile writing "Draft a welcoming email"
+falsiq review add --policy policy.toml -f selector-round.json
+falsiq brief --case CASE_ID --json
+falsiq outcomes report --json
+```
+
+Set `FALSIQ_STATE_ROOT` to an existing, non-symlink directory to operate without
+a Git repository and keep durable Falsiq state outside a target workspace.
+`falsiq rpc` serves one strict JSON request and response per line over stdio; it
+does not invoke models, agents, sockets, or network services.
+
+Architecture, integration, and operator procedures are documented in
+[`docs/architecture.md`](docs/architecture.md),
+[`docs/integration.md`](docs/integration.md), and
+[`docs/operations.md`](docs/operations.md).
 
 The command can be run from the checkout with `uv run falsiq` or installed as
 the `falsiq` console script. The production skill always uses the installed

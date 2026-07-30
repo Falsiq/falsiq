@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from importlib.resources import files
 
 REVIEW_PROMPT_NAMES = {
@@ -26,4 +27,13 @@ def load_production_prompt(name: str) -> str:
     return files("falsiq").joinpath("prompts", filename).read_text(encoding="utf-8")
 
 
-__all__ = ["REVIEW_PROMPT_NAMES", "load_production_prompt"]
+def production_prompt_digests() -> dict[str, str]:
+    """Return content identities for every canonical reviewer prompt."""
+
+    return {
+        name: hashlib.sha256(load_production_prompt(name).encode("utf-8")).hexdigest()
+        for name in REVIEW_PROMPT_NAMES
+    }
+
+
+__all__ = ["REVIEW_PROMPT_NAMES", "load_production_prompt", "production_prompt_digests"]

@@ -21,7 +21,7 @@ from falsiq.attacks import (
     validate_round_gate,
     write_collision_file,
 )
-from falsiq.facts import Artifact, ArtifactOption, AttackFact, RulingFact
+from falsiq.facts import Artifact, ArtifactOption, AttackFact, ReviewRoundFact, RulingFact
 
 TS = "2026-07-15T12:00:00.000Z"
 CASE_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -414,6 +414,53 @@ def test_empty_selection_does_not_append_a_batch() -> None:
 
     assert facts == ()
     assert calls == []
+
+
+def test_v2_round_three_is_policy_governed_and_records_empty_round() -> None:
+    first = attack_fact(0).model_copy(update={"schema_version": 2, "attacker_version": "a" * 64})
+    second = attack_fact(1).model_copy(
+        update={
+            "schema_version": 2,
+            "attacker_version": "b" * 64,
+            "round": 2,
+        }
+    )
+    rulings = {
+        first.id: ruling(0, first, "forbidden").model_copy(update={"schema_version": 2}),
+        second.id: ruling(1, second, "amend").model_copy(update={"schema_version": 2}),
+    }
+    calls: list[tuple[object, ...]] = []
+    versions = {
+        "boundary": "1" * 64,
+        "consequence": "2" * 64,
+        "prototype": "3" * 64,
+        "conflict": "4" * 64,
+        "omission": "5" * 64,
+    }
+
+    facts = append_attack_round(
+        build_selection_envelope(CASE_ID, 3, []),
+        existing_attacks=[first, second],
+        existing_rounds=(1, 2),
+        active_rulings=rulings,
+        append_batch=calls.append,
+        schema_version=2,
+        max_rounds=3,
+        prompt_versions=versions,
+        policy_digest="6" * 64,
+        profile_name="coding",
+        profile_digest="7" * 64,
+        id_factory=lambda: ATTACK_IDS[2],
+        timestamp_factory=lambda: TS,
+    )
+
+    assert facts == ()
+    assert len(calls) == 1
+    assert len(calls[0]) == 1
+    round_fact = calls[0][0]
+    assert isinstance(round_fact, ReviewRoundFact)
+    assert round_fact.round == 3
+    assert round_fact.selected_attack_ids == []
 
 
 def collision_attacks() -> list[AttackFact]:

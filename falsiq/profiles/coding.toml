@@ -1,0 +1,5 @@
+name = "coding"
+artifact_label = "implementation"
+backend = "git-worktree"
+verification_renderers = ["pytest", "command", "assertion", "checklist"]
+collision_term = "observable behavior"

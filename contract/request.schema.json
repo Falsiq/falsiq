@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://falsiq.dev/contracts/1.0.0/request.schema.json",
+  "title": "Falsiq RPC request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "op", "params"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "op": {
+      "type": "string",
+      "enum": [
+        "state",
+        "brief",
+        "intent",
+        "attack.assemble",
+        "rule",
+        "derive.request",
+        "derive.submit",
+        "outcome"
+      ]
+    },
+    "params": {"type": "object"}
+  }
+}

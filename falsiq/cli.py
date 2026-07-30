@@ -22,9 +22,23 @@ from .derive import (
     submit_derivation,
     write_derivation_request,
 )
-from .facts import AttackFact, IntentFact, RulingFact, new_ulid, utc_timestamp
+from .facts import (
+    AttackFact,
+    DerivationFact,
+    IntentFact,
+    ReviewRoundFact,
+    RulingFact,
+    SchemaMigrationFact,
+    new_ulid,
+    utc_timestamp,
+)
 from .ledger import FalsiqError, Ledger, LedgerValidationError
+from .outcomes import build_outcomes_report
+from .policy import PolicyError, load_policy, validate_round
+from .profiles import ProfileError, load_profile
+from .prompt_assets import production_prompt_digests
 from .review_language import neutralize_review_state
+from .rpc import serve as serve_rpc
 from .rulings import RulingCommandError, build_outcome, build_ruling_batch
 from .sandbox import SandboxError, create_sandbox, reap_sandboxes, sandbox_json
 from .workflow import (
@@ -47,12 +61,22 @@ def _init_command(_args: argparse.Namespace) -> int:
 def _intent_command(args: argparse.Namespace) -> int:
     ledger = Ledger.open()
     fact_id = new_ulid()
+    schema_version = ledger.write_schema_version()
+    profile_name: str | None = None
+    profile_digest: str | None = None
+    if schema_version == 2:
+        profile = load_profile(args.profile, path=args.profile_file)
+        profile_name = profile.profile.name
+        profile_digest = profile.digest
     fact = IntentFact(
+        schema_version=schema_version,
         id=fact_id,
         ts=utc_timestamp(),
         case_id=fact_id,
         text=args.text,
         source="user",
+        profile_name=profile_name,
+        profile_digest=profile_digest,
     )
     ledger.append(fact)
     print(fact.id)
@@ -138,11 +162,52 @@ def _review_add_command(args: argparse.Namespace) -> int:
     for fact in facts:
         if isinstance(fact, RulingFact) and fact.case_id == envelope.case_id:
             active_rulings[fact.attack_id] = fact
+    schema_version = ledger.write_schema_version()
+    existing_rounds: tuple[int, ...] = ()
+    max_rounds = 2
+    prompt_versions: dict[str, str] | None = None
+    policy_digest: str | None = None
+    profile_name: str | None = None
+    profile_digest: str | None = None
+    if schema_version == 2:
+        policy = load_policy(args.policy)
+        validate_round(envelope.round, policy.policy)
+        max_rounds = policy.policy.max_rounds
+        policy_digest = policy.digest
+        prompt_versions = production_prompt_digests()
+        existing_rounds = tuple(
+            fact.round
+            for fact in facts
+            if isinstance(fact, ReviewRoundFact) and fact.case_id == envelope.case_id
+        )
+        intent = next(
+            (
+                fact
+                for fact in facts
+                if isinstance(fact, IntentFact)
+                and fact.case_id == envelope.case_id
+                and fact.source == "user"
+            ),
+            None,
+        )
+        if intent is None or intent.profile_name is None or intent.profile_digest is None:
+            raise LedgerValidationError(
+                f"case {envelope.case_id} has no v2 domain-profile provenance"
+            )
+        profile_name = intent.profile_name
+        profile_digest = intent.profile_digest
     appended = append_attack_round(
         envelope,
         existing_attacks=existing_attacks,
+        existing_rounds=existing_rounds,
         active_rulings=active_rulings,
         append_batch=lambda batch: ledger.append_batch(batch, expected_head=ledger_head),
+        schema_version=schema_version,
+        max_rounds=max_rounds,
+        prompt_versions=prompt_versions,
+        policy_digest=policy_digest,
+        profile_name=profile_name,
+        profile_digest=profile_digest,
     )
     for fact in appended:
         print(fact.id)
@@ -212,6 +277,8 @@ def _outcome_command(args: argparse.Namespace) -> int:
         trace=args.trace,
         attack_id=args.review_id,
         notes=args.notes,
+        missable_class=args.missable_class,
+        prompt_version=args.prompt_version,
     )
     ledger_head = facts[-1].id if facts else None
     appended = ledger.append_batch([outcome], expected_head=ledger_head)
@@ -239,7 +306,7 @@ def _derive_command(args: argparse.Namespace) -> int:
     facts = ledger.read()
     if args.submit is None:
         request = build_derivation_request(facts, args.case_id)
-        print(write_derivation_request(ledger.root, request))
+        print(write_derivation_request(ledger.root, request, state_dir=ledger.state_dir))
         return 0
 
     response = DeriverResponse.model_validate_json(args.submit.read_bytes())
@@ -259,6 +326,7 @@ def _derive_command(args: argparse.Namespace) -> int:
         ledger.root,
         facts,
         response,
+        state_dir=ledger.state_dir,
         append_batch=lambda batch: ledger.append_batch(batch, expected_head=ledger_head),
         fact_committed=fact_committed,
     )
@@ -266,10 +334,73 @@ def _derive_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _brief_command(args: argparse.Namespace) -> int:
+    ledger, markdown_path = ready_brief(args.case_id)
+    if not args.json:
+        print(markdown_path.read_text(encoding="utf-8"), end="")
+        return 0
+    derivation = next(
+        (
+            fact
+            for fact in reversed(ledger.read())
+            if isinstance(fact, DerivationFact) and fact.case_id == args.case_id
+        ),
+        None,
+    )
+    if derivation is None or derivation.brief_json_path is None:
+        raise LedgerValidationError(
+            f"case {args.case_id} has no machine brief; migrate and derive again"
+        )
+    path = ledger.state_dir / derivation.brief_json_path
+    print(path.read_text(encoding="utf-8"), end="")
+    return 0
+
+
+def _migrate_command(args: argparse.Namespace) -> int:
+    ledger = Ledger.open()
+    if ledger.write_schema_version() == 2:
+        print("Ledger already writes durable fact schema version 2.")
+        return 0
+    if not args.apply:
+        print("Dry run: append schema migration 1 -> 2; no ledger bytes changed.")
+        return 0
+    facts = ledger.read()
+    head = facts[-1].id if facts else None
+    marker_id = new_ulid()
+    marker = SchemaMigrationFact(
+        id=marker_id,
+        ts=utc_timestamp(),
+        case_id=marker_id,
+        from_version=1,
+        to_version=2,
+    )
+    ledger.append_batch([marker], expected_head=head)
+    print(marker.id)
+    return 0
+
+
+def _outcomes_report_command(args: argparse.Namespace) -> int:
+    report = build_outcomes_report(Ledger.open().read(), since=args.since)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+    else:
+        print("# Falsiq outcome attribution")
+        for klass, row in report["by_class"].items():
+            print(
+                f"- {klass}: attacks={row['attacks_fired']}, "
+                f"elicited={row['reworks_elicited']}, missable={row['reworks_missable']}"
+            )
+    return 0
+
+
 def _guard_command(args: argparse.Namespace) -> int:
     ledger, brief = ready_brief(args.case_id)
     print(brief.relative_to(ledger.root))
     return 0
+
+
+def _rpc_command(_args: argparse.Namespace) -> int:
+    return serve_rpc(sys.stdin, sys.stdout)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -286,6 +417,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     intent_parser = commands.add_parser("intent", help="open a case with verbatim intent")
     intent_parser.add_argument("text")
+    intent_parser.add_argument("--profile", default="coding")
+    intent_parser.add_argument("--profile-file", type=Path)
     intent_parser.set_defaults(handler=_intent_command)
 
     log_parser = commands.add_parser("log", help="print canonical ledger facts")
@@ -331,13 +464,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--round",
         dest="round_number",
         type=int,
-        choices=(1, 2),
         required=True,
     )
     review_assemble_parser.add_argument("batches", nargs="*", type=Path)
     review_assemble_parser.set_defaults(handler=_review_assemble_command)
     review_add_parser = review_commands.add_parser("add", help="append a selector-approved round")
     review_add_parser.add_argument("-f", "--file", type=Path, required=True)
+    review_add_parser.add_argument("--policy", type=Path)
     review_add_parser.set_defaults(handler=_review_add_command)
 
     collide_parser = commands.add_parser("collide", help="render a case's open reviews")
@@ -364,6 +497,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     outcome_parser.add_argument("--review", dest="review_id")
+    outcome_parser.add_argument(
+        "--missable-class",
+        choices=("boundary", "consequence", "prototype", "conflict", "omission"),
+    )
+    outcome_parser.add_argument("--prompt-version")
     outcome_parser.add_argument("--notes", default="")
     outcome_parser.set_defaults(handler=_outcome_command)
 
@@ -385,12 +523,41 @@ def build_parser() -> argparse.ArgumentParser:
     derive_parser.add_argument("--submit", type=Path)
     derive_parser.set_defaults(handler=_derive_command)
 
+    brief_parser = commands.add_parser("brief", help="print the current derived brief")
+    brief_parser.add_argument("--case", dest="case_id", required=True)
+    brief_parser.add_argument("--json", action="store_true")
+    brief_parser.set_defaults(handler=_brief_command)
+
+    outcomes_parser = commands.add_parser(
+        "outcomes",
+        help="report outcome attribution",
+    )
+    outcomes_commands = outcomes_parser.add_subparsers(
+        dest="outcomes_command",
+        required=True,
+    )
+    outcomes_report = outcomes_commands.add_parser("report")
+    outcomes_report.add_argument("--since")
+    outcomes_report.add_argument("--json", action="store_true")
+    outcomes_report.set_defaults(handler=_outcomes_report_command)
+
+    migrate_parser = commands.add_parser(
+        "migrate",
+        help="activate a newer durable fact writer without rewriting history",
+    )
+    migrate_parser.add_argument("--to", type=int, choices=(2,), required=True)
+    migrate_parser.add_argument("--apply", action="store_true")
+    migrate_parser.set_defaults(handler=_migrate_command)
+
     guard_parser = commands.add_parser(
         "guard",
         help="verify a case is ready for implementation",
     )
     guard_parser.add_argument("--case", dest="case_id", required=True)
     guard_parser.set_defaults(handler=_guard_command)
+
+    rpc_parser = commands.add_parser("rpc", help="serve newline-delimited JSON requests")
+    rpc_parser.set_defaults(handler=_rpc_command)
     return parser
 
 
@@ -412,6 +579,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         RoundGateError,
         RulingCommandError,
         SandboxError,
+        PolicyError,
+        ProfileError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

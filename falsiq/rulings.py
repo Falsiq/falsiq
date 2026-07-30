@@ -10,6 +10,7 @@ from .facts import (
     IntentFact,
     OutcomeFact,
     RulingFact,
+    SchemaMigrationFact,
     new_ulid,
     utc_timestamp,
 )
@@ -64,7 +65,9 @@ def build_ruling_batch(
         ),
         None,
     )
+    schema_version = 2 if any(isinstance(fact, SchemaMigrationFact) for fact in facts) else 1
     ruling = RulingFact(
+        schema_version=schema_version,
         id=id_factory(),
         ts=timestamp_factory(),
         case_id=attack.case_id,
@@ -91,6 +94,7 @@ def build_ruling_batch(
         )
 
     amended = IntentFact(
+        schema_version=schema_version,
         id=id_factory(),
         ts=timestamp_factory(),
         case_id=attack.case_id,
@@ -110,6 +114,8 @@ def build_outcome(
     trace: str,
     attack_id: str | None,
     notes: str,
+    missable_class: str | None = None,
+    prompt_version: str | None = None,
     id_factory: Callable[[], str] = new_ulid,
     timestamp_factory: Callable[[], str] = utc_timestamp,
 ) -> OutcomeFact:
@@ -126,12 +132,15 @@ def build_outcome(
         if attack.case_id != case_id:
             raise RulingCommandError("outcome review must belong to the same case")
     return OutcomeFact(
+        schema_version=(2 if any(isinstance(fact, SchemaMigrationFact) for fact in facts) else 1),
         id=id_factory(),
         ts=timestamp_factory(),
         case_id=case_id,
         otype=otype,
         trace=trace,
         attack_id=attack_id,
+        missable_class=missable_class,
+        prompt_version=prompt_version,
         notes=notes,
     )
 

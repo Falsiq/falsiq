@@ -20,6 +20,7 @@ from typing import Literal, cast
 from pydantic import ValidationError
 
 from .facts import (
+    FACT_SCHEMA_VERSION,
     SCHEMA_VERSION,
     AttackFact,
     DerivationFact,
@@ -27,12 +28,32 @@ from .facts import (
     FactBase,
     IntentFact,
     OutcomeFact,
+    ReviewRoundFact,
     RulingFact,
+    SchemaMigrationFact,
     parse_fact,
 )
 
-FactKind = Literal["intent", "attack", "ruling", "derivation", "outcome"]
-_FACT_KINDS = frozenset({"intent", "attack", "ruling", "derivation", "outcome"})
+FactKind = Literal[
+    "intent",
+    "attack",
+    "review_round",
+    "ruling",
+    "derivation",
+    "outcome",
+    "schema_migration",
+]
+_FACT_KINDS = frozenset(
+    {
+        "intent",
+        "attack",
+        "review_round",
+        "ruling",
+        "derivation",
+        "outcome",
+        "schema_migration",
+    }
+)
 _TRANSACTION_VERSION = 1
 _TRANSACTION_FIELDS = frozenset(
     {
@@ -193,6 +214,37 @@ def discover_repository(start: str | os.PathLike[str] | None = None) -> Path:
     return Path(root_text).resolve()
 
 
+def _state_root_override() -> Path | None:
+    value = os.environ.get("FALSIQ_STATE_ROOT")
+    if value is None:
+        return None
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    try:
+        metadata = candidate.lstat()
+    except OSError as exc:
+        raise LedgerValidationError("FALSIQ_STATE_ROOT must name an existing directory") from exc
+    if stat.S_ISLNK(metadata.st_mode):
+        raise LedgerValidationError("FALSIQ_STATE_ROOT must not be a symbolic link")
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise LedgerValidationError("FALSIQ_STATE_ROOT must name an existing directory")
+    return candidate.resolve()
+
+
+def _workspace_root(
+    start: str | os.PathLike[str] | None,
+    *,
+    external_state: bool,
+) -> Path:
+    if not external_state:
+        return discover_repository(start)
+    candidate = Path.cwd() if start is None else Path(start)
+    if candidate.is_file():
+        candidate = candidate.parent
+    return candidate.resolve()
+
+
 def canonical_fact_json(fact: FactBase) -> str:
     """Serialize one fact to the sole accepted on-disk JSON representation."""
 
@@ -230,6 +282,16 @@ def _validate_derivation_commitments(fact: DerivationFact) -> None:
         )
     if not _is_canonical_sha256(fact.brief_sha256):
         raise LedgerValidationError("derivation brief_sha256 is not canonical SHA-256")
+    expected_json = f"cases/{fact.case_id}/derived/brief.json"
+    if (fact.brief_json_path is None) != (fact.brief_json_sha256 is None):
+        raise LedgerValidationError(
+            "derivation brief_json_path and brief_json_sha256 must be supplied together"
+        )
+    if fact.brief_json_path is not None:
+        if fact.brief_json_path != expected_json:
+            raise LedgerValidationError(f"derivation brief_json_path must equal {expected_json}")
+        if not _is_canonical_sha256(fact.brief_json_sha256):
+            raise LedgerValidationError("derivation brief_json_sha256 is not canonical SHA-256")
 
     paths = fact.test_stub_paths
     digest_paths = set(fact.test_stub_sha256)
@@ -271,10 +333,19 @@ def validate_fact_sequence(facts: Sequence[Fact]) -> None:
     active_rulings: dict[str, RulingFact] = {}
     amendment_rulings: dict[str, RulingFact] = {}
     amendment_intents: dict[str, IntentFact] = {}
+    review_rounds: set[tuple[str, int]] = set()
+    migration_seen = False
 
     for position, fact in enumerate(facts):
         if fact.id in by_id:
             raise LedgerValidationError(f"duplicate fact id: {fact.id}")
+
+        if isinstance(fact, SchemaMigrationFact):
+            if migration_seen:
+                raise LedgerValidationError("ledger is already migrated to schema version 2")
+            migration_seen = True
+            by_id[fact.id] = fact
+            continue
 
         is_root = isinstance(fact, IntentFact) and fact.source == "user"
         if is_root:
@@ -327,6 +398,20 @@ def validate_fact_sequence(facts: Sequence[Fact]) -> None:
                     raise LedgerValidationError("attack target must belong to the same case")
             for path in _artifact_paths(fact):
                 _validate_case_artifact_path(path, fact.case_id)
+
+        elif isinstance(fact, ReviewRoundFact):
+            key = (fact.case_id, fact.round)
+            if key in review_rounds:
+                raise LedgerValidationError(
+                    f"case {fact.case_id} already has review round {fact.round}"
+                )
+            for attack_id in fact.selected_attack_ids:
+                attack = _require_prior(by_id, attack_id, AttackFact, "selected attack")
+                if attack.case_id != fact.case_id or attack.round != fact.round:
+                    raise LedgerValidationError(
+                        "selected review-round attacks must belong to the same case and round"
+                    )
+            review_rounds.add(key)
 
         elif isinstance(fact, RulingFact):
             target_attack = _require_prior(by_id, fact.attack_id, AttackFact, "attack")
@@ -440,7 +525,10 @@ def derive_case_state(facts: Sequence[Fact], case_id: str) -> dict[str, object]:
     derivations = [
         fact.model_dump(mode="json") for fact in case_facts if isinstance(fact, DerivationFact)
     ]
-    return {
+    review_round_facts = [
+        fact.model_dump(mode="json") for fact in case_facts if isinstance(fact, ReviewRoundFact)
+    ]
+    state: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "case_id": case_id,
         "ledger_head": facts[-1].id if facts else None,
@@ -452,6 +540,9 @@ def derive_case_state(facts: Sequence[Fact], case_id: str) -> dict[str, object]:
         "derivations": derivations,
         "rounds_used": sorted({attack.round for attack in attacks}),
     }
+    if review_round_facts:
+        state["review_rounds"] = review_round_facts
+    return state
 
 
 @contextmanager
@@ -491,17 +582,18 @@ def _file_lock(path: Path, *, exclusive: bool) -> Iterator[None]:
 class Ledger:
     """One repository's single append-only Falsiq fact ledger."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, state_dir: Path | None = None) -> None:
         self.root = root.resolve()
-        self.state_dir = self.root / ".falsiq"
+        self.state_dir = state_dir.resolve() if state_dir is not None else self.root / ".falsiq"
         self.path = self.state_dir / "ledger.jsonl"
         self.lock_path = self.state_dir / ".ledger.lock"
         self.journal_path = self.state_dir / ".ledger.txn"
 
     @classmethod
     def initialize(cls, start: str | os.PathLike[str] | None = None) -> Ledger:
-        root = discover_repository(start)
-        ledger = cls(root)
+        state_dir = _state_root_override()
+        root = _workspace_root(start, external_state=state_dir is not None)
+        ledger = cls(root, state_dir=state_dir)
         if ledger.state_dir.is_symlink():
             raise LedgerValidationError(".falsiq must not be a symlink")
         ledger.state_dir.mkdir(exist_ok=True)
@@ -523,7 +615,9 @@ class Ledger:
 
     @classmethod
     def open(cls, start: str | os.PathLike[str] | None = None) -> Ledger:
-        ledger = cls(discover_repository(start))
+        state_dir = _state_root_override()
+        root = _workspace_root(start, external_state=state_dir is not None)
+        ledger = cls(root, state_dir=state_dir)
         if not ledger.state_dir.is_dir() or not ledger.path.is_file():
             raise LedgerNotInitializedError(
                 f"Falsiq is not initialized in {ledger.root}; run `falsiq init`"
@@ -831,6 +925,13 @@ class Ledger:
 
     def append(self, fact: FactBase | Mapping[str, object]) -> Fact:
         return self.append_batch([fact])[0]
+
+    def write_schema_version(self) -> int:
+        return (
+            FACT_SCHEMA_VERSION
+            if any(isinstance(fact, SchemaMigrationFact) for fact in self.read())
+            else SCHEMA_VERSION
+        )
 
     def append_batch(
         self,

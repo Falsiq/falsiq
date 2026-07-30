@@ -1,0 +1,5 @@
+name = "writing"
+artifact_label = "document draft"
+backend = "tmpdir"
+verification_renderers = ["command", "assertion", "checklist"]
+collision_term = "wording or structure"

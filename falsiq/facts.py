@@ -18,12 +18,16 @@ from pydantic import (
     StringConstraints,
     TypeAdapter,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
 from .constraints import validate_consequence_artifact
 
+# Transient reviewer/deriver protocols remain at v1. Durable facts accept v1
+# forever and write v2 only after an explicit migration marker.
 SCHEMA_VERSION = 1
+FACT_SCHEMA_VERSION = 2
 
 _CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _CROCKFORD_VALUES = {character: index for index, character in enumerate(_CROCKFORD_ALPHABET)}
@@ -32,6 +36,10 @@ _TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(?:
 
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")]
 Sha256Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+StableName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$"),
+]
 OptionKey = Annotated[
     str,
     StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
@@ -181,7 +189,7 @@ class Artifact(StrictFactModel):
 class FactBase(StrictFactModel):
     """Fields present on every line of the versioned ledger."""
 
-    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    schema_version: Literal[1, 2] = SCHEMA_VERSION
     id: Ulid = Field(default_factory=new_ulid)
     ts: str = Field(default_factory=utc_timestamp)
     kind: str
@@ -199,6 +207,8 @@ class IntentFact(FactBase):
     source: Literal["user", "amendment"]
     supersedes: Ulid | None = None
     source_ruling_id: Ulid | None = None
+    profile_name: StableName | None = None
+    profile_digest: Sha256Digest | None = None
 
     @field_validator("text")
     @classmethod
@@ -214,7 +224,21 @@ class IntentFact(FactBase):
                 raise ValueError("root intent case_id must equal its id")
         elif self.supersedes is None or self.source_ruling_id is None:
             raise ValueError("amendment intents require supersedes and source_ruling_id")
+        if (self.profile_name is None) != (self.profile_digest is None):
+            raise ValueError("profile_name and profile_digest must be supplied together")
+        if self.schema_version == 1 and self.profile_name is not None:
+            raise ValueError("domain profiles require durable fact schema version 2")
+        if self.schema_version == 2 and self.source == "user" and self.profile_name is None:
+            raise ValueError("v2 root intents require profile_name and profile_digest")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_versioned(self, handler: object) -> dict[str, object]:
+        data = handler(self)
+        if self.schema_version == 1:
+            data.pop("profile_name", None)
+            data.pop("profile_digest", None)
+        return data
 
 
 class AttackFact(FactBase):
@@ -226,7 +250,8 @@ class AttackFact(FactBase):
     silent_settles: list[str] = Field(default_factory=list)
     hate_scenario: str
     render_cost: Literal["trivial", "cheap", "expensive"]
-    round: int = Field(ge=1, le=2)
+    round: int = Field(ge=1)
+    attacker_version: Sha256Digest | None = None
 
     @field_validator("targets")
     @classmethod
@@ -256,6 +281,82 @@ class AttackFact(FactBase):
         missing = set(self.silent_settles).difference(self.settles)
         if missing:
             raise ValueError("silent_settles must be a subset of settles")
+        if self.schema_version == 2 and self.attacker_version is None:
+            raise ValueError("v2 attacks require attacker_version")
+        if self.schema_version == 1 and self.attacker_version is not None:
+            raise ValueError("attacker_version requires durable fact schema version 2")
+        if self.schema_version == 1 and self.round > 2:
+            raise ValueError("v1 attack rounds must not exceed 2")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_versioned(self, handler: object) -> dict[str, object]:
+        data = handler(self)
+        if self.schema_version == 1:
+            data.pop("attacker_version", None)
+        return data
+
+
+class OpenAmbiguity(StrictFactModel):
+    decision: str
+    reason: str
+
+    @field_validator("decision", "reason")
+    @classmethod
+    def text_is_bounded(cls, value: str, info: object) -> str:
+        label = getattr(info, "field_name", "ambiguity")
+        value = _require_nonblank(value, name=label)
+        if len(value) > 1_000:
+            raise ValueError(f"{label} must contain at most 1000 characters")
+        return value
+
+
+class ReviewRoundFact(FactBase):
+    """Durable provenance for a complete five-reviewer round, including empty roles."""
+
+    schema_version: Literal[FACT_SCHEMA_VERSION] = FACT_SCHEMA_VERSION
+    kind: Literal["review_round"] = "review_round"
+    round: int = Field(ge=1)
+    max_rounds: int = Field(ge=1)
+    prompt_versions: dict[StableName, Sha256Digest]
+    policy_digest: Sha256Digest
+    profile_name: StableName
+    profile_digest: Sha256Digest
+    selected_attack_ids: list[Ulid] = Field(default_factory=list)
+    open_ambiguities: list[OpenAmbiguity] = Field(default_factory=list, max_length=20)
+
+    @field_validator("prompt_versions")
+    @classmethod
+    def all_reviewer_roles_are_pinned(cls, value: dict[str, str]) -> dict[str, str]:
+        expected = {"boundary", "consequence", "prototype", "conflict", "omission"}
+        if set(value) != expected:
+            raise ValueError("prompt_versions must contain all five reviewer roles")
+        return value
+
+    @field_validator("selected_attack_ids")
+    @classmethod
+    def selected_ids_are_unique(cls, value: list[str]) -> list[str]:
+        return _require_unique(value, name="selected_attack_ids")
+
+    @model_validator(mode="after")
+    def round_respects_recorded_budget(self) -> ReviewRoundFact:
+        if self.round > self.max_rounds:
+            raise ValueError("round must not exceed recorded max_rounds")
+        return self
+
+
+class SchemaMigrationFact(FactBase):
+    """Append-only marker selecting the schema for future facts."""
+
+    schema_version: Literal[FACT_SCHEMA_VERSION] = FACT_SCHEMA_VERSION
+    kind: Literal["schema_migration"] = "schema_migration"
+    from_version: Literal[1] = 1
+    to_version: Literal[2] = 2
+
+    @model_validator(mode="after")
+    def marker_is_its_own_global_case(self) -> SchemaMigrationFact:
+        if self.case_id != self.id:
+            raise ValueError("schema migration case_id must equal its id")
         return self
 
 
@@ -294,6 +395,8 @@ class DerivationFact(FactBase):
     ledger_head: Ulid
     brief_path: SafePath
     brief_sha256: Sha256Digest
+    brief_json_path: SafePath | None = None
+    brief_json_sha256: Sha256Digest | None = None
     test_stub_paths: list[SafePath] = Field(default_factory=list)
     test_stub_sha256: dict[SafePath, Sha256Digest]
 
@@ -307,6 +410,13 @@ class DerivationFact(FactBase):
         expected_brief = f"cases/{self.case_id}/derived/IMPLEMENTATION_BRIEF.md"
         if self.brief_path != expected_brief:
             raise ValueError(f"derivation brief_path must equal {expected_brief}")
+        expected_json = f"cases/{self.case_id}/derived/brief.json"
+        if (self.brief_json_path is None) != (self.brief_json_sha256 is None):
+            raise ValueError("brief_json_path and brief_json_sha256 must be supplied together")
+        if self.brief_json_path is not None and self.brief_json_path != expected_json:
+            raise ValueError(f"derivation brief_json_path must equal {expected_json}")
+        if self.schema_version == 2 and self.brief_json_path is None:
+            raise ValueError("v2 derivations require a committed brief.json")
 
         expected_parent = f"cases/{self.case_id}/derived/tests"
         for path in self.test_stub_paths:
@@ -329,12 +439,24 @@ class DerivationFact(FactBase):
             )
         return self
 
+    @model_serializer(mode="wrap")
+    def serialize_versioned(self, handler: object) -> dict[str, object]:
+        data = handler(self)
+        if self.schema_version == 1:
+            data.pop("brief_json_path", None)
+            data.pop("brief_json_sha256", None)
+        return data
+
 
 class OutcomeFact(FactBase):
     kind: Literal["outcome"] = "outcome"
     otype: Literal["rework", "accepted", "abandoned"]
     trace: Literal["elicited", "missable", "novel", "n/a"]
     attack_id: Ulid | None = None
+    missable_class: (
+        Literal["boundary", "consequence", "prototype", "conflict", "omission"] | None
+    ) = None
+    prompt_version: Sha256Digest | None = None
     notes: str
 
     @model_validator(mode="after")
@@ -348,11 +470,30 @@ class OutcomeFact(FactBase):
             raise ValueError(
                 "accepted and abandoned outcomes require trace n/a and no review reference"
             )
+        if self.schema_version == 2 and self.trace == "missable":
+            if self.missable_class is None or self.prompt_version is None:
+                raise ValueError("v2 missable outcomes require missable_class and prompt_version")
+        elif self.missable_class is not None or self.prompt_version is not None:
+            raise ValueError("missable attribution fields are only valid for missable rework")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_versioned(self, handler: object) -> dict[str, object]:
+        data = handler(self)
+        if self.schema_version == 1:
+            data.pop("missable_class", None)
+            data.pop("prompt_version", None)
+        return data
 
 
 Fact = Annotated[
-    IntentFact | AttackFact | RulingFact | DerivationFact | OutcomeFact,
+    IntentFact
+    | AttackFact
+    | ReviewRoundFact
+    | RulingFact
+    | DerivationFact
+    | OutcomeFact
+    | SchemaMigrationFact,
     Field(discriminator="kind"),
 ]
 _FACT_ADAPTER = TypeAdapter(Fact)
@@ -367,6 +508,7 @@ def parse_fact(value: str | bytes | Mapping[str, object]) -> Fact:
 
 
 __all__ = [
+    "FACT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "Artifact",
     "ArtifactOption",
@@ -375,10 +517,14 @@ __all__ = [
     "Fact",
     "FactBase",
     "IntentFact",
+    "OpenAmbiguity",
     "OutcomeFact",
+    "ReviewRoundFact",
     "RulingFact",
     "SafePath",
+    "SchemaMigrationFact",
     "Sha256Digest",
+    "StableName",
     "Ulid",
     "new_ulid",
     "parse_fact",

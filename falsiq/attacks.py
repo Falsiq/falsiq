@@ -33,6 +33,9 @@ from .facts import (
     SCHEMA_VERSION,
     Artifact,
     AttackFact,
+    FactBase,
+    OpenAmbiguity,
+    ReviewRoundFact,
     RulingFact,
     Ulid,
     new_ulid,
@@ -226,7 +229,7 @@ class SelectionEnvelope(StrictTransientModel):
 
     schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
     case_id: Ulid
-    round: int = Field(ge=1, le=2)
+    round: int = Field(ge=1)
     candidates: list[CandidateRecord] = Field(default_factory=list, max_length=_MAX_CANDIDATES)
     selected: list[CandidateDigest] = Field(default_factory=list, max_length=_MAX_SELECTED)
 
@@ -291,7 +294,7 @@ def selection_rationale(envelope: SelectionEnvelope) -> tuple[str, ...]:
 
 
 class RoundGateError(ValueError):
-    """A selector envelope violates the per-case two-round annoyance budget."""
+    """A selector envelope violates the per-case round policy."""
 
 
 def validate_round_gate(
@@ -300,33 +303,47 @@ def validate_round_gate(
     existing_attacks: Sequence[AttackFact],
     active_rulings: Mapping[str, RulingFact],
     case_id: str | None = None,
+    max_rounds: int = 2,
+    existing_rounds: Sequence[int] = (),
 ) -> None:
-    """Validate one-batch-per-round and the evidence-based round-two gate."""
+    """Validate one-batch-per-round and the evidence-based follow-up gate."""
 
     cases = {attack.case_id for attack in existing_attacks}
     if len(cases) > 1 or (case_id is not None and cases.difference({case_id})):
         raise RoundGateError("round gate context must contain reviews from one case")
-    if round_number not in {1, 2}:
-        raise RoundGateError("review rounds are capped at 2")
-    if any(attack.round == round_number for attack in existing_attacks):
+    if round_number < 1 or round_number > max_rounds:
+        raise RoundGateError(f"review rounds are capped at {max_rounds}")
+    observed_rounds = {attack.round for attack in existing_attacks}
+    observed_rounds.update(existing_rounds)
+    if round_number in observed_rounds:
         raise RoundGateError(f"review round {round_number} already exists")
     if round_number == 1:
         if existing_attacks:
             raise RoundGateError("round 1 must be the first review batch")
         return
 
-    round_one = [attack for attack in existing_attacks if attack.round == 1]
-    if not round_one:
-        raise RoundGateError("round 2 requires round 1 reviews")
-    open_ids = [attack.id for attack in round_one if attack.id not in active_rulings]
+    previous_round_number = round_number - 1
+    previous_round = [
+        attack for attack in existing_attacks if attack.round == previous_round_number
+    ]
+    if not previous_round:
+        raise RoundGateError(f"round {round_number} requires round {previous_round_number} reviews")
+    open_ids = [attack.id for attack in previous_round if attack.id not in active_rulings]
     if open_ids:
-        raise RoundGateError("round 1 is still open")
-    for attack in round_one:
+        raise RoundGateError(f"round {previous_round_number} is still open")
+    for attack in previous_round:
         ruling = active_rulings[attack.id]
         if ruling.attack_id != attack.id or ruling.case_id != attack.case_id:
-            raise RoundGateError("active ruling does not match its round 1 review")
-    if not any(active_rulings[attack.id].verdict in {"amend", "forbidden"} for attack in round_one):
-        raise RoundGateError("round 2 requires an amend or forbidden round 1 ruling")
+            raise RoundGateError(
+                f"active ruling does not match its round {previous_round_number} review"
+            )
+    if not any(
+        active_rulings[attack.id].verdict in {"amend", "forbidden"} for attack in previous_round
+    ):
+        raise RoundGateError(
+            f"round {round_number} requires an amend or forbidden "
+            f"round {previous_round_number} ruling"
+        )
 
 
 def _materialize_selected(
@@ -334,15 +351,24 @@ def _materialize_selected(
     *,
     id_factory: Callable[[], str],
     timestamp_factory: Callable[[], str],
+    schema_version: int = 1,
+    prompt_versions: Mapping[str, str] | None = None,
 ) -> tuple[AttackFact, ...]:
     facts = tuple(
         AttackFact(
+            schema_version=schema_version,
             id=id_factory(),
             ts=timestamp_factory(),
             case_id=envelope.case_id,
             round=envelope.round,
             hate_scenario=record.candidate.risk_scenario,
-            **record.candidate.model_dump(mode="python", exclude={"risk_scenario"}),
+            attacker_version=(
+                prompt_versions[record.candidate.klass] if prompt_versions is not None else None
+            ),
+            **record.candidate.model_dump(
+                mode="python",
+                exclude={"risk_scenario", "schema_version"},
+            ),
         )
         for record in envelope.selected_records
     )
@@ -355,10 +381,18 @@ def append_attack_round(
     envelope: SelectionEnvelope,
     *,
     existing_attacks: Sequence[AttackFact],
+    existing_rounds: Sequence[int] = (),
     active_rulings: Mapping[str, RulingFact],
-    append_batch: Callable[[tuple[AttackFact, ...]], object],
+    append_batch: Callable[[tuple[FactBase, ...]], object],
     id_factory: Callable[[], str] = new_ulid,
     timestamp_factory: Callable[[], str] = utc_timestamp,
+    schema_version: int = 1,
+    max_rounds: int = 2,
+    prompt_versions: Mapping[str, str] | None = None,
+    policy_digest: str | None = None,
+    profile_name: str | None = None,
+    profile_digest: str | None = None,
+    open_ambiguities: Sequence[OpenAmbiguity] = (),
 ) -> tuple[AttackFact, ...]:
     """Materialize selected reviews and submit them in one atomic ledger call."""
 
@@ -367,14 +401,41 @@ def append_attack_round(
         existing_attacks=existing_attacks,
         active_rulings=active_rulings,
         case_id=envelope.case_id,
+        max_rounds=max_rounds,
+        existing_rounds=existing_rounds,
     )
     facts = _materialize_selected(
         envelope,
         id_factory=id_factory,
         timestamp_factory=timestamp_factory,
+        schema_version=schema_version,
+        prompt_versions=prompt_versions,
     )
-    if facts:
-        append_batch(facts)
+    if schema_version == 1:
+        if facts:
+            append_batch(facts)
+        return facts
+    if (
+        prompt_versions is None
+        or policy_digest is None
+        or profile_name is None
+        or profile_digest is None
+    ):
+        raise ValueError("v2 attack rounds require prompt, policy, and profile provenance")
+    round_fact = ReviewRoundFact(
+        id=id_factory(),
+        ts=timestamp_factory(),
+        case_id=envelope.case_id,
+        round=envelope.round,
+        max_rounds=max_rounds,
+        prompt_versions=dict(prompt_versions),
+        policy_digest=policy_digest,
+        profile_name=profile_name,
+        profile_digest=profile_digest,
+        selected_attack_ids=[fact.id for fact in facts],
+        open_ambiguities=list(open_ambiguities),
+    )
+    append_batch((*facts, round_fact))
     return facts
 
 

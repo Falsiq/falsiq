@@ -132,7 +132,7 @@ Python project or Falsiq source checkout.
 
 ## Set up the development environment
 
-Falsiq supports Python 3.11 and newer. Runtime dependencies are deliberately
+Falsiq supports Python 3.13 and newer. Runtime dependencies are deliberately
 limited to Pydantic v2 plus the standard library; command parsing uses
 `argparse`. Hatchling builds the package. Use the checked-in uv lockfile and do
 not introduce another package manager.
@@ -182,7 +182,8 @@ uv run pytest -q tests/test_derivation.py::test_stale_response_is_rejected_befor
 uv run pytest -q -x -vv tests/test_evaluation.py
 uv run pytest -q
 uv run pytest -q --cov=falsiq --cov-branch --cov-report=term-missing
-uv run --python 3.11 pytest -q
+uv run --python 3.13 pytest -q
+uv run --python 3.14 pytest -q
 uv run ruff check .
 uv run ruff format --check .
 ```
