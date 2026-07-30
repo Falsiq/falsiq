@@ -27,6 +27,18 @@ Deferred by explicit project decision:
 - publication of kill-criterion numbers;
 - automated prompt optimization, which remains a non-goal.
 
+## Verification
+
+Verified locally on 2026-07-29 with uv-managed CPython 3.13.5 and 3.14.3:
+
+- Python 3.13: 525 tests passed with 84% total branch-aware coverage;
+- Python 3.14: 525 tests passed;
+- `ruff check .` and `ruff format --check .`: passed;
+- `uv build`: wheel and source distribution built successfully;
+- the representative brief fixture is digest-pinned in the Conductor
+  compatibility suite;
+- a non-Git writing-profile flow through a private external state root passed.
+
 ## Human reviewer instructions
 
 1. Review `contract/` first; it is the downstream compatibility boundary.
@@ -42,14 +54,12 @@ Deferred by explicit project decision:
 
 Automated:
 
-- run the full tests and branch coverage on Python 3.13;
-- run the full tests on Python 3.14;
-- run Ruff check/format and build wheel/sdist with `uv build`;
-- run the shared Conductor black-box harness against the contract fixtures.
+- keep the Python 3.13/3.14, Ruff, build, and contract-compatibility matrix in CI;
+- add consumer-owned negative fixtures when the public contract changes;
+- run the official replay/live benchmark only after its corpus is approved.
 
 Manual:
 
-- perform a non-Git writing-profile smoke through a private external state root;
 - inspect the golden contract fixture diff as a product/API change;
 - curate and human-gate the corpus before any official benchmark run;
 - record benchmark evidence and prompt-change decisions in `DECISIONS.md`.
