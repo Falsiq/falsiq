@@ -15,6 +15,8 @@ attribution. Existing schema-v1 ledger lines remain readable and are never
 rewritten. See [`contract/README.md`](contract/README.md) for the only supported
 cross-component boundary and [`state.md`](state.md) for implementation status.
 
+![Falsiq architecture and review flow](docs/architecture.svg)
+
 ## Development
 
 ```console

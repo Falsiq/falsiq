@@ -1,10 +1,10 @@
 # Falsiq implementation state
 
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 ## Current status
 
-Branch: `feature/falsiq-v1-runtime`
+Repository status: v1 implementation is merged on `main`.
 
 Falsiq v1's runtime and public integration surface are implemented. Existing
 schema-v1 ledger bytes remain readable; migration appends a writer-switch marker

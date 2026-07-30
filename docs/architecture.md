@@ -1,5 +1,7 @@
 # Falsiq v1 architecture
 
+![Falsiq architecture and review flow](architecture.svg)
+
 Falsiq owns intent elicitation, not execution. It records verbatim intent,
 selected adversarial artifacts, explicit human rulings, derived obligation
 commitments, and outcome attribution. It does not store plans, tool traces,

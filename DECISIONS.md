@@ -1,7 +1,7 @@
 # Design decisions
 
-This file records v0 clarifications where the PRD's interfaces otherwise leave
-durable state or runtime behavior ambiguous.
+This file records repository-owned decisions that make durable state and runtime
+behavior explicit.
 
 ## D027: Version 1 migration is an append-only writer switch
 

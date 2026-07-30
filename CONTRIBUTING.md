@@ -25,12 +25,9 @@ Before changing behavior, read the repository-owned sources together:
   among these sources is a bug to resolve explicitly, not permission to choose
   one silently.
 
-The original development workspace may also contain `../PRD.md`, which records
-the thesis, core loop, success criteria, and v0 non-goals that started the
-project. It is not part of this Git repository or wheel, so a normal clone does
-not contain it. This guide carries the contributor-facing architecture and
-motivation; do not introduce a runtime or packaging dependency on the outer
-workspace document.
+This repository is self-contained. Contributor-facing architecture, motivation,
+runtime behavior, and release criteria must live in its tracked documentation,
+contracts, tests, and decision records.
 
 Record a new durable or security-relevant interpretation in `DECISIONS.md`.
 Update the README when a user-facing command, artifact, prerequisite, or
@@ -42,7 +39,7 @@ protocols, review selection, ruling and derivation handoffs, prototype
 sandboxes, replay-first evaluation, corpus release controls, and the agent
 skill workflow for Claude Code, Cursor, Codex, and generic skill-aware hosts. It does **not** include a bundled provider adapter, invoke a language
 model from the `falsiq` CLI, contain an approved held-out corpus, or establish
-the PRD's held-out success thresholds. Do not claim those results without a
+official held-out success thresholds. Do not claim those results without a
 human-approved, access-logged official run.
 
 ## Architecture and data flow
@@ -342,9 +339,9 @@ Prompt and workflow files are executable contracts, not informal prose.
   [`eval/README.md`](eval/README.md), operator scripts, privacy tests, and access
   controls. Smoke data under `tests/fixtures/eval/` is test data, never a
   benchmark candidate or holdout.
-- A design change that departs from the original PRD must be explicit in
-  `DECISIONS.md`, with the implementation, regression test, and user-facing
-  documentation in the same atomic series.
+- A durable-format, security-boundary, or product-behavior change must be
+  explicit in `DECISIONS.md`, with the implementation, regression test, and
+  user-facing documentation in the same atomic series.
 
 ## Good contribution areas
 

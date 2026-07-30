@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">Falsiq architecture and review flow</title>
+  <desc id="desc">Verbatim intent enters deterministic CLI and RPC plumbing, external reviewers produce transient candidates, validated selections and human rulings become append-only facts, and a derived brief is exported to an implementation caller.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .core { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; }
+      .durable { fill: #ede9fe; stroke: #7c3aed; stroke-width: 2; }
+      .human { fill: #fef3c7; stroke: #d97706; stroke-width: 2; }
+      .external { fill: #f1f5f9; stroke: #64748b; stroke-width: 2; stroke-dasharray: 7 5; }
+      .output { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .line { fill: none; stroke: #334155; stroke-width: 2.2; marker-end: url(#arrow); }
+      .feedback { fill: none; stroke: #7c3aed; stroke-width: 2; stroke-dasharray: 7 5; marker-end: url(#arrow); }
+      .title { fill: #0f172a; font: 700 28px Inter, "Segoe UI", Arial, sans-serif; }
+      .subtitle { fill: #475569; font: 15px Inter, "Segoe UI", Arial, sans-serif; }
+      .label { fill: #0f172a; font: 700 16px Inter, "Segoe UI", Arial, sans-serif; text-anchor: middle; }
+      .small { fill: #475569; font: 13px Inter, "Segoe UI", Arial, sans-serif; text-anchor: middle; }
+      .lane { fill: #64748b; font: 700 12px Inter, "Segoe UI", Arial, sans-serif; letter-spacing: 1.4px; }
+      .note { fill: #7c3aed; font: 600 12px Inter, "Segoe UI", Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1200" height="560" rx="18"/>
+  <text class="title" x="40" y="48">Falsiq · adversarial intent review</text>
+  <text class="subtitle" x="40" y="76">Models stay outside the deterministic core; durable facts remain the source of every rendered view.</text>
+
+  <text class="lane" x="40" y="112">REVIEW PIPELINE</text>
+
+  <rect class="panel" x="40" y="135" width="145" height="92" rx="12"/>
+  <text class="label" x="112" y="172">Verbatim intent</text>
+  <text class="small" x="112" y="197">profile + policy</text>
+
+  <rect class="core" x="220" y="135" width="150" height="92" rx="12"/>
+  <text class="label" x="295" y="172">CLI / RPC</text>
+  <text class="small" x="295" y="197">strict plumbing</text>
+
+  <rect class="core" x="405" y="135" width="175" height="92" rx="12"/>
+  <text class="label" x="492" y="164">Role request</text>
+  <text class="label" x="492" y="184">builder</text>
+  <text class="small" x="492" y="207">pinned prompts</text>
+
+  <rect class="external" x="615" y="125" width="205" height="112" rx="12"/>
+  <text class="label" x="717" y="158">5 external reviewers</text>
+  <text class="small" x="717" y="183">boundary · consequence</text>
+  <text class="small" x="717" y="202">prototype · conflict · omission</text>
+  <text class="small" x="717" y="221">transient processes</text>
+
+  <rect class="core" x="855" y="135" width="225" height="92" rx="12"/>
+  <text class="label" x="967" y="164">Validate · score · select</text>
+  <text class="small" x="967" y="188">strict schemas + deterministic</text>
+  <text class="small" x="967" y="207">round admission</text>
+
+  <path class="line" d="M185 181 H220"/>
+  <path class="line" d="M370 181 H405"/>
+  <path class="line" d="M580 181 H615"/>
+  <path class="line" d="M820 181 H855"/>
+
+  <text class="lane" x="40" y="286">DURABLE CORE AND OUTPUT</text>
+
+  <rect class="human" x="40" y="320" width="205" height="105" rx="12"/>
+  <text class="label" x="142" y="352">Human rulings</text>
+  <text class="small" x="142" y="377">intended · forbidden</text>
+  <text class="small" x="142" y="397">don’t care · amend</text>
+
+  <rect class="durable" x="310" y="300" width="340" height="145" rx="14"/>
+  <text class="label" x="480" y="334">Append-only fact ledger</text>
+  <text class="small" x="480" y="362">intent · review rounds · rulings</text>
+  <text class="small" x="480" y="382">migration · derivation · outcomes</text>
+  <text class="small" x="480" y="410">canonical JSONL + committed digests</text>
+
+  <rect class="core" x="715" y="320" width="190" height="105" rx="12"/>
+  <text class="label" x="810" y="352">Brief renderer</text>
+  <text class="small" x="810" y="378">Markdown + brief.json</text>
+  <text class="small" x="810" y="398">stable obligation IDs</text>
+
+  <rect class="output" x="970" y="320" width="190" height="105" rx="12"/>
+  <text class="label" x="1065" y="352">Implementation caller</text>
+  <text class="small" x="1065" y="378">pins obligations</text>
+  <text class="small" x="1065" y="398">reports outcomes later</text>
+
+  <path class="line" d="M967 227 V267 H560 V300"/>
+  <path class="line" d="M295 227 V267 H400 V300"/>
+  <path class="line" d="M245 372 H310"/>
+  <path class="line" d="M650 372 H715"/>
+  <path class="line" d="M905 372 H970"/>
+  <path class="feedback" d="M1065 425 V495 H480 V445"/>
+  <text class="note" x="725" y="488">outcome attribution feeds new facts, never rewrites history</text>
+</svg>

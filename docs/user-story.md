@@ -408,7 +408,7 @@ It is usually not useful for:
 - read-only explanation, status, diagnosis, or review;
 - a spelling or formatting-only correction;
 - asking the CLI to choose what the human wants—the CLI never does;
-- generating a standalone PRD or silently improving a prompt; or
+- replacing intent capture with speculative requirements or silently improving a prompt; or
 - preserving prototype code as production implementation.
 
 An explicit invocation is still honored for any task. A genuinely complete
