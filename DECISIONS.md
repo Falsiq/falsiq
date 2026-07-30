@@ -3,6 +3,35 @@
 This file records v0 clarifications where the PRD's interfaces otherwise leave
 durable state or runtime behavior ambiguous.
 
+## D027: Version 1 migration is an append-only writer switch
+
+`falsiq migrate --to 2` is a dry run. `--apply` appends one global migration
+fact; it never rewrites a schema-v1 line. Readers accept both versions forever,
+while new facts use schema v2 after the marker. Round limits live in
+digest-pinned TOML policy rather than the durable schema.
+
+## D028: The public integration boundary is copied, not imported
+
+External components depend only on `contract/`: its semantic version, JSON
+Schemas, and byte-stable fixtures. The Python package remains an implementation
+detail. `brief.json` commits stable obligation IDs, explicit discretion and open
+ambiguities, plus prompt, policy, profile, and deriver provenance.
+
+## D029: RPC is strict stdio over direct domain functions
+
+`falsiq rpc` accepts newline-delimited JSON and emits exactly one response for
+each input line. Operations accept structured values rather than filesystem
+paths. The process invokes no model, agent, socket, or shell; external
+orchestrators retain process ownership. `FALSIQ_STATE_ROOT` is the sole v1
+cross-workspace federation mechanism.
+
+## D030: Prompt improvement remains human-gated
+
+Attack facts and complete review-round facts pin prompt content digests. Outcome
+reports attribute elicited and missable rework to those identities, but Falsiq
+does not edit prompts. A human must change a prompt and approve it against the
+frozen benchmark before merge.
+
 ## D001: Cases share one ledger
 
 Each root intent opens a case. Every downstream fact carries its `case_id`, and
